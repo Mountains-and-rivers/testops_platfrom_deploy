@@ -38,19 +38,24 @@ mirror_repo:
 
   # 容器镜像仓库
   container_registry:
-    # 主仓库（内网优先，回退公网）
-    primary: "registry.testops.local"
-    fallback: "registry.cn-hangzhou.aliyuncs.com"
-
-    # 各组件镜像前缀映射
+    # 各官方 registry 的镜像加速 endpoints（按优先级排列）
     mirrors:
-      k8s_gcr_io: "registry.cn-hangzhou.aliyuncs.com/google_containers"
-      docker_hub: "registry.cn-hangzhou.aliyuncs.com/dockerhub"
-      quay_io: "registry.cn-hangzhou.aliyuncs.com/quayio"
-      ghcr_io: "registry.cn-hangzhou.aliyuncs.com/ghcr"
+      docker.io:
+        - "https://registry.cn-hangzhou.aliyuncs.com/dockerhub"
+        - "https://docker.m.daocloud.io"
+        - "https://registry-1.docker.io"
+      registry.k8s.io:
+        - "https://registry.cn-hangzhou.aliyuncs.com/google_containers"
+        - "https://registry.k8s.io"
+      quay.io:
+        - "https://registry.cn-hangzhou.aliyuncs.com/quayio"
+        - "https://quay.io"
+      ghcr.io:
+        - "https://registry.cn-hangzhou.aliyuncs.com/ghcr"
+        - "https://ghcr.io"
 
     # 镜像拉取策略
-    pull_policy: "IfNotPresent"        # Always | IfNotPresent | Never
+    pull_policy: "IfNotPresent"
 
   # 二进制/软件包下载源
   software_downloads:

@@ -1,0 +1,54 @@
+# ============================================================
+# K8s 集群数据备份策略配置
+# ============================================================
+
+backup_policy:
+  # ----- 备份范围 -----
+  scope:
+    # etcd 数据快照
+    etcd_snapshot: true
+    # 集群证书
+    certificates: true
+    # kubeadm 配置文件
+    kubeadm_config: true
+    # 节点上的 kubelet 配置
+    kubelet_config: false
+    # 静态 Pod 清单
+    static_pod_manifests: true
+
+  # ----- etcd 快照配置 -----
+  etcd:
+    # 快照保存目录
+    snapshot_dir: "/opt/testops/backup/etcd"
+    # 本地保留份数
+    local_retention_count: 7
+    # 远程备份
+    remote:
+      enabled: false
+      type: "s3"                           # s3 | nfs | scp
+      endpoint: ""
+      bucket: "testops-k8s-backup"
+      path: "etcd-snapshots/"
+
+  # ----- 证书备份 -----
+  certificates:
+    source_dir: "/etc/kubernetes/pki"
+    # 备份到本地路径
+    local_backup_dir: "/opt/testops/backup/pki"
+
+  # ----- 备份调度 -----
+  schedule:
+    # 定时备份（cron 表达式）
+    cron: "0 2 * * *"                      # 每天凌晨 2:00
+    # 部署/升级前自动备份
+    auto_before_deploy: true
+    auto_before_upgrade: true
+
+  # ----- 备份保留策略 -----
+  retention:
+    # 按数量保留
+    max_backups: 30
+    # 按时间保留
+    max_age_days: 90
+    # 清理策略：删除超出限制的旧备份
+    auto_cleanup: true

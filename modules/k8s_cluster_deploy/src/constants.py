@@ -19,9 +19,9 @@ class DeployStage(Enum):
     STAGE6_CNI_DEPLOY = (6, "stage6_cni_deploy", "Calico 网络插件部署")
     STAGE7_CLUSTER_VERIFY = (7, "stage7_cluster_verify", "集群部署后健康校验")
 
-    def __init__(self, order, name, description):
+    def __init__(self, order, stage_name, description):
         self.order = order
-        self.name = name
+        self.stage_name = stage_name
         self.description = description
 
     @classmethod
@@ -78,7 +78,15 @@ class Commands:
     CHECK_KERNEL_VERSION = "uname -r"
     CHECK_CPU_CORES = "nproc"
     CHECK_MEMORY_MB = "free -m | awk '/^Mem:/{print $2}'"
-    CHECK_DISK_GB = "df -BG / | awk 'NR==2{print $2}' | tr -d 'G'"
+    # 检查 /var/lib 所在分区的可用空间（K8s/containerd 数据实际存放位置）
+    # 如果 /var/lib 是独立挂载点则检查它，否则回退到 /
+    CHECK_DISK_GB = (
+        "mountpoint -q /var/lib 2>/dev/null && "
+        "df -BG /var/lib | awk 'NR==2{print $4}' | tr -d 'G' || "
+        "df -BG / | awk 'NR==2{print $4}' | tr -d 'G'"
+    )
+    # 列出所有挂载点及可用空间（用于预检报告参考）
+    CHECK_ALL_MOUNTS = "df -h --output=target,avail | tail -n +2"
     CHECK_SWAP = "swapon --show"
     CHECK_SELINUX = "getenforce"
     CHECK_FIREWALL = "systemctl is-active firewalld 2>/dev/null || echo inactive"
@@ -92,7 +100,7 @@ class HardwareRequirements:
     """部署 K8s 集群的硬件最低要求。"""
     MIN_CPU_CORES = 2                     # Master 建议 4 核
     MIN_MEMORY_MB = 2048                  # Master 建议 4096 MB
-    MIN_DISK_GB = 40                      # 建议 >= 100 GB
+    MIN_DISK_GB = 30                      # /var/lib 可用空间，建议 >= 100 GB
     RECOMMENDED_CPU_MASTER = 4
     RECOMMENDED_MEMORY_MASTER = 4096
     RECOMMENDED_DISK_GB = 100

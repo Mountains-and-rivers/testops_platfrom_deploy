@@ -8,7 +8,10 @@ TestOps Platform Deploy — 顶层统一 CLI 入口
 import sys
 import click
 
-from common.logger import get_logger
+from common.logger import get_logger, setup_stdout_encoding
+
+# 确保 Windows GBK 终端下 Unicode（emoji / ✓ ✗ 等）正常输出
+setup_stdout_encoding()
 
 logger = get_logger(__name__)
 

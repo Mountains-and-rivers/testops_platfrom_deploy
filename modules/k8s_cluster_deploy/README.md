@@ -308,6 +308,72 @@ python -m modules.k8s_cluster_deploy.module_main status
   ○ stage7_cluster_verify [pending]
 ```
 
+### 单阶段执行
+
+每个阶段都可以独立执行，不依赖完整流水线：
+
+```bash
+# 单独执行指定阶段（0-7）
+python -m modules.k8s_cluster_deploy.module_main stage 0    # 仅环境预检
+python -m modules.k8s_cluster_deploy.module_main stage 1    # 仅系统初始化
+python -m modules.k8s_cluster_deploy.module_main stage 2    # 仅安装 containerd
+python -m modules.k8s_cluster_deploy.module_main stage 3    # 仅安装 K8s 组件
+python -m modules.k8s_cluster_deploy.module_main stage 4    # 仅 Master 初始化
+python -m modules.k8s_cluster_deploy.module_main stage 5    # 仅 Node 加入
+python -m modules.k8s_cluster_deploy.module_main stage 6    # 仅部署 CNI
+python -m modules.k8s_cluster_deploy.module_main stage 7    # 仅健康校验
+```
+
+| 阶段 | 命令 | 说明 |
+|------|------|------|
+| Stage 0 | `stage 0` | 环境预检（只读） |
+| Stage 1 | `stage 1` | 系统初始化（关闭 swap/selinux/防火墙） |
+| Stage 2 | `stage 2` | 安装配置 containerd |
+| Stage 3 | `stage 3` | 安装 kubeadm/kubectl/kubelet |
+| Stage 4 | `stage 4` | kubeadm init 初始化 Master |
+| Stage 5 | `stage 5` | kubeadm join 加入 Worker |
+| Stage 6 | `stage 6` | 部署 Calico CNI |
+| Stage 7 | `stage 7` | 集群健康校验（只读） |
+
+### 单阶段回滚/卸载
+
+每个阶段都可独立回滚，清除该阶段所做的所有更改。回滚后该阶段及后续阶段状态重置为 PENDING，**可从当前阶段继续安装**：
+
+```bash
+# 回滚指定阶段（1-6，Stage 0 和 Stage 7 是只读操作，无需回滚）
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 1    # 恢复系统初始化
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 2    # 卸载 containerd
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 3    # 卸载 K8s 组件
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 4    # kubeadm reset Master
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 5    # 移除 Worker 节点
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 6    # 移除 Calico CNI
+
+# 强制回滚（跳过确认）
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 4 --force
+```
+
+| 阶段 | 回滚命令 | 回滚操作 |
+|------|---------|---------|
+| Stage 1 | `uninstall-stage 1` | 恢复 SELinux、恢复 swap、重启防火墙、删除 sysctl/limits 配置 |
+| Stage 2 | `uninstall-stage 2` | 停止 containerd → yum remove → 删除配置和数据目录 |
+| Stage 3 | `uninstall-stage 3` | 停止 kubelet → yum remove kubeadm/kubectl/kubelet → 清理仓库 |
+| Stage 4 | `uninstall-stage 4` | kubeadm reset --force → 清理 .kube/config → 清除 join token |
+| Stage 5 | `uninstall-stage 5` | kubectl drain + delete node → Worker 节点 kubeadm reset |
+| Stage 6 | `uninstall-stage 6` | kubectl delete calico → 清理 CNI 接口和配置 |
+
+### 典型工作流：安装 → 回滚 → 重新安装
+
+```bash
+# 1. 完整安装
+python -m modules.k8s_cluster_deploy.module_main install
+
+# 2. Stage 4 有问题？单独回滚 Master 初始化
+python -m modules.k8s_cluster_deploy.module_main uninstall-stage 4
+
+# 3. 修复问题后，从 Stage 4 继续
+python -m modules.k8s_cluster_deploy.module_main install --stage 4
+```
+
 ### 升级/回滚（预留）
 
 ```bash

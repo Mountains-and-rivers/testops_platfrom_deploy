@@ -108,18 +108,29 @@ class WorkflowStateManager:
             self.stages = [
                 StageRecord.from_dict(s) for s in data.get("stages", [])
             ]
-            logger.debug(f"加载工作流状态: {self.state_file}")
+            # 汇总当前各阶段状态
+            status_summary = ", ".join(
+                f"{s.stage_name}=[{s.status.value}]" for s in self.stages
+            ) if self.stages else "(无已注册阶段)"
+            logger.info(f"📂 已加载工作流状态: {self.state_file}")
+            logger.info(f"   工作流类型: {self.workflow_type}, 阶段状态: {status_summary}")
         else:
-            logger.debug(f"状态文件不存在，初始化新状态: {self.state_file}")
+            logger.info(f"📄 状态文件不存在，初始化新状态: {self.state_file}")
         return self
 
     def save(self) -> None:
         """保存状态到文件。"""
-        self.updated_at = time.time()
+        now = time.time()
+        self.updated_at = now
+        if not self.created_at:
+            self.created_at = now
+        # 确保 updated_at >= created_at（修复浮点精度导致的时间倒序问题）
+        if self.updated_at < self.created_at:
+            self.updated_at = self.created_at
         data = {
             "component_name": self.component_name,
             "workflow_type": self.workflow_type,
-            "created_at": self.created_at or time.time(),
+            "created_at": self.created_at,
             "updated_at": self.updated_at,
             "global_data": self.global_data,
             "stages": [s.to_dict() for s in self.stages],
@@ -228,11 +239,31 @@ class WorkflowStateManager:
         record = self.get_stage(stage_name)
         return record is not None and record.status == StageStatus.SUCCESS
 
+    def require_stage_success(self, stage_name: str) -> dict:
+        """
+        要求前置阶段必须已成功完成，否则抛出异常。
+        同时返回该阶段的 global_data 供后续阶段使用。
+
+        用法:
+            pre_check_data = state.require_stage_success("stage0_pre_check")
+            # pre_check_data 包含 stage0 存入 global_data 的所有数据
+        """
+        self.load()
+        record = self.get_stage(stage_name)
+        if record is None or record.status != StageStatus.SUCCESS:
+            raise RuntimeError(
+                f"前置阶段 {stage_name} 未成功完成（当前状态: {record.status.value if record else 'unknown'}），"
+                f"请先执行该阶段后再继续"
+            )
+        logger.info(f"✓ 前置阶段校验通过: {stage_name}")
+        return self.global_data
+
     def reset_from_stage(self, stage_name: str) -> None:
         """
         从指定阶段开始重置（将该阶段及之后的所有阶段重置为 PENDING）。
         用于断点续跑时清理后续阶段状态。
         """
+        reset_stages = []
         reset = False
         for stage in self.stages:
             if stage.stage_name == stage_name:
@@ -242,6 +273,11 @@ class WorkflowStateManager:
                 stage.start_time = None
                 stage.end_time = None
                 stage.error = None
+                reset_stages.append(stage.stage_name)
+        if reset_stages:
+            logger.info(f"🔄 重置阶段状态 → PENDING: {', '.join(reset_stages)}")
+        else:
+            logger.warning(f"⚠ 未找到阶段 '{stage_name}'，跳过重置")
         self.save()
 
     # ----- 全局数据存取 -----

@@ -216,40 +216,79 @@ python main.py status
 python main.py version
 ```
 
-## 单独组件命令
+## K8s 集群部署命令
+
+### 一键安装/卸载
+
+```bash
+cd modules/k8s_cluster_deploy
+
+# 一键安装（Stage 0→7，支持断点续跑）
+python module_main.py install
+
+# 一键卸载（Stage 7→1 逆序回滚）
+python module_main.py uninstall --force
+```
+
+### 分阶段命令
+
+| 阶段 | 安装 | 回滚 |
+|------|------|------|
+| Stage 0 环境预检 | `python module_main.py check` | 只读，无需回滚 |
+| Stage 1 系统初始化 | `python module_main.py install --stage 1` | `python module_main.py uninstall-stage 1 --force` |
+| Stage 2 Containerd | `python module_main.py install --stage 2` | `python module_main.py uninstall-stage 2 --force` |
+| Stage 3 K8s 组件 | `python module_main.py install --stage 3` | `python module_main.py uninstall-stage 3 --force` |
+| Stage 4 Master 初始化 | `python module_main.py install --stage 4` | `python module_main.py uninstall-stage 4 --force` |
+| Stage 5 Node 加入 | `python module_main.py install --stage 5` | `python module_main.py uninstall-stage 5 --force` |
+| Stage 6 CNI 部署 | `python module_main.py install --stage 6` | `python module_main.py uninstall-stage 6 --force` |
+| Stage 7 集群验证 | `python module_main.py install --stage 7` | `python module_main.py uninstall-stage 7 --force` |
+
+```bash
+# 单独执行指定阶段
+python module_main.py stage 4    # 仅执行 Stage 4
+
+# 查看部署状态
+python module_main.py status
+
+# 预览安装计划
+python module_main.py install --dry-run
+```
+
+### 镜像准备（Master 节点执行）
+
+```bash
+# 拉取 K8s 组件镜像（保存到 ~/k8s-images/）
+sudo bash scripts/pull_k8s_images.sh
+
+# 拉取 Calico 镜像
+sudo bash scripts/pull_k8s_images.sh --calico v3.27.0
+
+# 拷贝到工作站
+scp root@<master-ip>:~/k8s-images/*.tar modules/k8s_cluster_deploy/images/
+```
+
+### 单独组件命令
 
 每个组件都有独立的 CLI 入口，可脱离全局 CLI 单独调试运行：
 
 ```bash
-# === K8s 集群部署独立命令 ===
-
 # 完整安装（自动先执行预检）
-python -m modules.k8s_cluster_deploy.module_main install
+python module_main.py install
 
 # 从指定阶段开始安装（断点续跑）
-python -m modules.k8s_cluster_deploy.module_main install --stage 3
-
-# 预览安装计划
-python -m modules.k8s_cluster_deploy.module_main install --dry-run
+python module_main.py install --stage 3
 
 # 仅环境预检
-python -m modules.k8s_cluster_deploy.module_main check
+python module_main.py check
 
 # 完整卸载（销毁集群，幂等操作）
-python -m modules.k8s_cluster_deploy.module_main uninstall
-
-# 强制卸载（跳过确认）
-python -m modules.k8s_cluster_deploy.module_main uninstall --force
+python module_main.py uninstall --force
 
 # 备份集群数据
-python -m modules.k8s_cluster_deploy.module_main backup
+python module_main.py backup
 
-# 查看部署状态（读取 workflow.state）
-python -m modules.k8s_cluster_deploy.module_main status
-
-# 升级/回滚（预留）
-python -m modules.k8s_cluster_deploy.module_main upgrade
-python -m modules.k8s_cluster_deploy.module_main rollback
+# 查看部署状态
+python module_main.py status
 ```
 
 ## K8s 集群部署流程（8 阶段详解）

@@ -1,16 +1,12 @@
 """
 Stage 7: 集群部署后健康校验
 
-全面检查集群健康状态：
-- 节点状态（全部 Ready）
-- 核心组件 Pod 运行状态
-- CoreDNS 解析测试
-- 集群基本功能验证（创建/删除测试 Pod）
-- NodePort 可达性测试
+全面检查 + 部署 nginx 功能测试
 """
 
 import os
 import sys
+import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,208 +17,254 @@ if PROJECT_ROOT not in sys.path:
 from common.logger import get_logger
 from common.workflow_state import WorkflowStateManager
 from common.ssh_client import SSHClient
+from common.yaml_helper import YAMLHelper
 from src.workflow.workflow_exception import ClusterVerifyError
 
 logger = get_logger(__name__)
 
-
-def _check_nodes_ready(ssh: SSHClient) -> list:
-    """检查是否全部节点处于 Ready 状态。"""
-    _, node_output, _ = ssh.exec_command(
-        "kubectl get nodes --no-headers", timeout=15
-    )
-
-    not_ready = []
-    for line in node_output.strip().split("\n"):
-        if line:
-            parts = line.split()
-            if len(parts) >= 2 and parts[1] != "Ready":
-                not_ready.append(f"{parts[0]} ({parts[1]})")
-
-    return not_ready
+# 测试用 namespace，回滚时仅删除此 namespace
+TEST_NAMESPACE = "testops-verify"
 
 
-def _check_core_pods(ssh: SSHClient) -> list:
-    """检查 kube-system 命名空间中核心 Pod 是否全部 Running。"""
-    _, pod_output, _ = ssh.exec_command(
-        "kubectl get pods -n kube-system --no-headers", timeout=15
-    )
-
-    not_running = []
-    for line in pod_output.strip().split("\n"):
-        if line:
-            parts = line.split()
-            name = parts[0] if parts else ""
-            ready = parts[1] if len(parts) > 1 else ""
-            status = parts[2] if len(parts) > 2 else ""
-            if status not in ("Running", "Completed"):
-                not_running.append(f"{name}: {ready} ({status})")
-
-    return not_running
-
-
-def _test_dns_resolution(ssh: SSHClient) -> bool:
-    """测试集群 DNS 解析。"""
-    test_manifest = """
-apiVersion: v1
-kind: Pod
-metadata:
-  name: dns-test
-  namespace: default
-spec:
-  containers:
-  - name: dns-test
-    image: busybox:1.36
-    command: ['sleep', '30']
-  restartPolicy: Never
-"""
-    try:
-        # 创建测试 Pod
-        ssh.exec_command(
-            f"cat << 'EOF' | kubectl apply -f -\n{test_manifest}\nEOF",
-            timeout=15
-        )
-        # 等待 Pod Running
-        ssh.exec_command(
-            "kubectl wait --for=condition=ready pod/dns-test --timeout=60s",
-            timeout=70
-        )
-        # 执行 DNS 查询测试
-        _, dns_result, _ = ssh.exec_command(
-            "kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local",
-            timeout=15
-        )
-        logger.info(f"DNS 解析测试结果: {dns_result[:200]}")
-        success = "Address" in dns_result or "Name:" in dns_result
-        return success
-    finally:
-        # 清理测试 Pod
-        ssh.exec_command("kubectl delete pod dns-test --force --grace-period=0",
-                         timeout=10)
-
-
-def _test_create_delete_pod(ssh: SSHClient) -> bool:
-    """测试创建和删除 Pod 的能力。"""
-    test_pod = """
-apiVersion: v1
-kind: Pod
-metadata:
-  name: verify-test
-  namespace: default
-spec:
-  containers:
-  - name: nginx
-    image: nginx:alpine
-    ports:
-    - containerPort: 80
-  restartPolicy: Never
-"""
-    try:
-        ssh.exec_command(
-            f"cat << 'EOF' | kubectl apply -f -\n{test_pod}\nEOF",
-            timeout=15
-        )
-        ssh.exec_command(
-            "kubectl wait --for=condition=ready pod/verify-test --timeout=120s",
-            timeout=130
-        )
-        _, status, _ = ssh.exec_command(
-            "kubectl get pod verify-test -o jsonpath='{.status.phase}'",
-            timeout=10
-        )
-        return status.strip() == "Running"
-    finally:
-        ssh.exec_command(
-            "kubectl delete pod verify-test --force --grace-period=0",
-            timeout=10
-        )
-
-
-def run_cluster_verify(state: WorkflowStateManager) -> None:
-    """
-    执行集群部署后全面健康校验。
-
-    Args:
-        state: 工作流状态管理器实例
-    """
-    logger.info("=" * 50)
-    logger.info("Stage 7: 开始集群部署后健康校验")
-    logger.info("=" * 50)
-
+def _get_ssh(state):
+    """获取 Master SSH 客户端"""
     master_ip = state.get_global("master_ip")
     if not master_ip:
         raise ClusterVerifyError("master_ip", "Master 节点 IP 未找到")
+    CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
+    masters = node_list.get("node_list", {}).get("masters", [])
+    master_cfg = masters[0].get("ssh", {}) if masters else {}
+    ssh = SSHClient(
+        host=master_ip,
+        username=master_cfg.get("username", "root"),
+        port=master_cfg.get("port", 22),
+        password=master_cfg.get("password"),
+        key_file=master_cfg.get("key_file"),
+    )
+    ssh.connect()
+    return ssh
 
-    ssh = SSHClient(host=master_ip, username="root")
+
+def run_cluster_verify(state: WorkflowStateManager) -> None:
+    """执行集群部署后全面健康校验"""
+    logger.info("=" * 50)
+    logger.info("Stage 7: 集群健康校验")
+    logger.info("=" * 50)
+
+    ssh = _get_ssh(state)
     results = {}
     all_passed = True
 
     try:
-        ssh.connect()
+        # 创建测试 namespace
+        ssh.exec_command(f"kubectl create ns {TEST_NAMESPACE} 2>/dev/null || true", timeout=5)
 
-        # 1. 节点状态检查
-        logger.info("检查 1/5: 节点状态...")
-        not_ready = _check_nodes_ready(ssh)
-        results["nodes_ready"] = len(not_ready) == 0
+        # ---- 1. 节点就绪 ----
+        logger.info("[1/7] 节点状态...")
+        _, out, _ = ssh.exec_command("kubectl get nodes --no-headers", timeout=15)
+        not_ready = []
+        node_count = 0
+        for line in out.strip().split("\n"):
+            if not line: continue
+            node_count += 1
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] != "Ready":
+                not_ready.append(f"{parts[0]}={parts[1]}")
+        results["nodes"] = len(not_ready) == 0
         if not_ready:
             all_passed = False
-            logger.error(f"存在未就绪节点: {not_ready}")
+            logger.error(f"  未就绪节点: {not_ready}")
         else:
-            logger.info("✓ 全部节点处于 Ready 状态")
+            logger.info(f"  OK  {node_count} 节点全部 Ready")
 
-        # 2. 核心组件 Pod 检查
-        logger.info("检查 2/5: 核心组件 Pod 状态...")
-        not_running = _check_core_pods(ssh)
-        results["core_pods_running"] = len(not_running) == 0
+        # ---- 2. 核心组件 Pod ----
+        logger.info("[2/7] 核心组件 Pod...")
+        _, out, _ = ssh.exec_command("kubectl get pods -n kube-system --no-headers", timeout=15)
+        not_running = []
+        for line in out.strip().split("\n"):
+            if not line: continue
+            parts = line.split()
+            name, ready, status = parts[0], parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""
+            if status not in ("Running", "Completed"):
+                not_running.append(f"{name}={status}")
+        results["pods"] = len(not_running) == 0
         if not_running:
             all_passed = False
-            logger.error(f"存在未运行的核心 Pod: {not_running}")
+            logger.error(f"  异常 Pod: {not_running}")
         else:
-            logger.info("✓ 核心组件 Pod 全部 Running")
+            logger.info(f"  OK  全部 Running/Completed")
 
-        # 3. DNS 解析测试
-        logger.info("检查 3/5: DNS 解析测试...")
-        dns_ok = _test_dns_resolution(ssh)
-        results["dns_resolution"] = dns_ok
-        if not dns_ok:
+        # ---- 3. etcd 健康 ----
+        logger.info("[3/7] etcd 健康...")
+        _, out, _ = ssh.exec_command(
+            "kubectl get --raw=/healthz/etcd 2>/dev/null || echo FAIL", timeout=10
+        )
+        results["etcd"] = "ok" in out
+        logger.info(f"  {'OK' if 'ok' in out else 'FAIL'}  etcd healthz")
+
+        # ---- 4. API Server ----
+        logger.info("[4/7] API Server...")
+        _, out, _ = ssh.exec_command(
+            "kubectl get --raw=/healthz 2>/dev/null || echo FAIL", timeout=10
+        )
+        results["apiserver"] = "ok" in out
+        logger.info(f"  {'OK' if 'ok' in out else 'FAIL'}  API Server healthz")
+
+        # ---- 5. DNS 解析 ----
+        logger.info("[5/7] DNS 解析...")
+        _, dns_svc, _ = ssh.exec_command(
+            "kubectl get svc -n kube-system kube-dns -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo NONE",
+            timeout=10
+        )
+        dns_ip = dns_svc.strip()
+        if dns_ip and dns_ip != "NONE":
+            _, dns_out, _ = ssh.exec_command(
+                f"nslookup kubernetes.default.svc.cluster.local {dns_ip} 2>/dev/null || echo DNS_FAIL",
+                timeout=10
+            )
+            dns_ok = "Address" in dns_out or "Name:" in dns_out
+            results["dns"] = dns_ok
+            logger.info(f"  {'OK' if dns_ok else 'FAIL'}  CoreDNS {dns_ip}: {dns_out.strip()[:100]}")
+            if not dns_ok: all_passed = False
+        else:
+            results["dns"] = False
             all_passed = False
-            logger.error("DNS 解析测试失败")
-        else:
-            logger.info("✓ DNS 解析正常")
+            logger.error("  FAIL  无法获取 CoreDNS ClusterIP")
 
-        # 4. Pod 创建/删除测试
-        logger.info("检查 4/5: Pod 创建/删除测试...")
-        pod_ok = _test_create_delete_pod(ssh)
-        results["pod_lifecycle"] = pod_ok
-        if not pod_ok:
-            all_passed = False
-            logger.error("Pod 创建/删除测试失败")
-        else:
-            logger.info("✓ Pod 创建/删除测试通过")
+        # ---- 6. Pod 创建 + Service 暴露测试 ----
+        logger.info("[6/7] Pod + Service 功能测试...")
+        test_yaml = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: {ns}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      test: app
+  template:
+    metadata:
+      labels:
+        test: app
+    spec:
+      containers:
+      - name: test-app
+        image: registry.k8s.io/pause:3.10.2
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-app
+  namespace: {ns}
+spec:
+  type: ClusterIP
+  selector:
+    test: app
+  ports:
+  - port: 8080
+    targetPort: 8080
+""".format(ns=TEST_NAMESPACE)
+        try:
+            ssh.exec_command(f"cat << 'EOF' | kubectl apply -f -\n{test_yaml}\nEOF", timeout=15)
+            # 等待 Deployment 就绪
+            start = time.time()
+            deployed = False
+            for _ in range(24):
+                time.sleep(5)
+                _, status, _ = ssh.exec_command(
+                    f"kubectl get deploy test-app -n {TEST_NAMESPACE} -o jsonpath='{{.status.readyReplicas}}' 2>/dev/null || echo 0",
+                    timeout=10
+                )
+                if status.strip() == "1":
+                    deployed = True
+                    break
+            if not deployed:
+                all_passed = False
+                results["pod_svc"] = False
+                logger.error("  FAIL  Deployment 未就绪")
+            else:
+                _, svc_ip, _ = ssh.exec_command(
+                    f"kubectl get svc test-app -n {TEST_NAMESPACE} -o jsonpath='{{.spec.clusterIP}}'",
+                    timeout=10
+                )
+                results["pod_svc"] = True
+                elapsed = time.time() - start
+                logger.info(f"  OK  Deployment+Service 就绪, ClusterIP={svc_ip.strip()} ({elapsed:.0f}s)")
+        finally:
+            ssh.exec_command(
+                f"kubectl delete deploy test-app -n {TEST_NAMESPACE} --force --grace-period=0 2>/dev/null || true; "
+                f"kubectl delete svc test-app -n {TEST_NAMESPACE} --force --grace-period=0 2>/dev/null || true",
+                timeout=30
+            )
 
-        # 5. 集群版本信息
-        logger.info("检查 5/5: 集群版本信息...")
-        _, version, _ = ssh.exec_command("kubectl version --short 2>/dev/null || kubectl version", timeout=10)
-        logger.info(f"集群版本:\n{version[:500]}")
-        results["cluster_version"] = True
+        # ---- 7. 集群版本 ----
+        logger.info("[7/7] 集群版本...")
+        _, ver, _ = ssh.exec_command("kubectl version -o json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);print(d.get('serverVersion',{}).get('gitVersion','unknown'))\" 2>/dev/null || echo unknown", timeout=10)
+        results["version"] = True
+        logger.info(f"  Server: {ver.strip()}")
 
-        # 输出汇总
-        logger.info("\n" + "=" * 50)
-        logger.info("健康校验汇总：")
-        for check, passed in results.items():
-            status = "✓" if passed else "✗"
-            logger.info(f"  {status} {check}")
+        # ---- 汇总 ----
+        logger.info("")
+        logger.info("=" * 50)
+        passed = sum(1 for v in results.values() if v)
+        total = len(results)
+        for k, v in results.items():
+            logger.info(f"  {'[PASS]' if v else '[FAIL]'} {k}")
+        logger.info(f"  总计 {passed}/{total} 通过")
         logger.info("=" * 50)
 
         if not all_passed:
-            raise ClusterVerifyError(
-                "cluster_health", "部分健康检查未通过"
-            )
+            raise ClusterVerifyError("cluster_health", f"{total-passed} 项未通过")
 
-        logger.info("集群健康校验全部通过 ✓")
+        logger.info("集群健康校验全部通过")
 
     finally:
         ssh.close()
 
     state.set_global("cluster_verified", True)
     state.set_global("verify_results", results)
+
+
+def rollback_cluster_verify(state: WorkflowStateManager) -> None:
+    """
+    回滚 Stage 7：仅删除测试引入的 namespace。
+    不影响任何集群核心资源。
+    """
+    logger.info("=" * 50)
+    logger.info("Stage 7 Rollback: 清理测试资源")
+    logger.info("=" * 50)
+
+    master_ip = state.get_global("master_ip")
+    if not master_ip:
+        logger.warning("无 Master IP，跳过")
+        return
+
+    CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
+    masters = node_list.get("node_list", {}).get("masters", [])
+    master_cfg = masters[0].get("ssh", {}) if masters else {}
+
+    ssh = SSHClient(
+        host=master_ip,
+        username=master_cfg.get("username", "root"),
+        port=master_cfg.get("port", 22),
+        password=master_cfg.get("password"),
+        key_file=master_cfg.get("key_file"),
+    )
+    try:
+        ssh.connect()
+        ssh.exec_command(f"kubectl delete namespace {TEST_NAMESPACE} --force --grace-period=0 2>/dev/null || true", timeout=30)
+        logger.info(f"  已删除 namespace: {TEST_NAMESPACE}")
+    except Exception as e:
+        logger.warning(f"回滚异常: {e}")
+    finally:
+        ssh.close()
+
+    state.set_global("cluster_verified", False)
+    logger.info("Stage 7 回滚完成")

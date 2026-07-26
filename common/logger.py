@@ -7,8 +7,10 @@
 - 彩色控制台输出（colorlog）
 - 自动按日滚动日志文件
 - 运行时动态调整日志级别
+- Windows GBK 终端下自动适配 UTF-8 输出（UnicodeEncodeError 容错）
 """
 
+import io
 import os
 import sys
 import logging
@@ -48,6 +50,33 @@ COLOR_MAP = {
 }
 
 
+class _SafeUTF8StreamHandler(logging.StreamHandler):
+    """
+    安全的 UTF-8 StreamHandler。
+
+    在 Windows GBK 终端下，直接写入 sys.stdout 会因无法编码 emoji / Unicode
+    特殊字符而抛出 UnicodeEncodeError。此 handler 绕过 Python 文本层的编码
+    限制，直接写入底层 buffer（UTF-8 字节），兼容中英文混输场景。
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record) + self.terminator
+            stream = self.stream
+            # 优先写入底层二进制 buffer（绕过 GBK 编码限制）
+            if hasattr(stream, 'buffer') and stream.buffer is not None:
+                try:
+                    stream.buffer.write(msg.encode('utf-8', errors='replace'))
+                    stream.buffer.flush()
+                    return
+                except Exception:
+                    pass
+            # 回退：直接写入文本流（Unix / UTF-8 终端走这里）
+            stream.write(msg)
+        except Exception:
+            self.handleError(record)
+
+
 def get_logger(
     name: str,
     level: str = "INFO",
@@ -78,9 +107,9 @@ def get_logger(
 
     datefmt = "%Y-%m-%d %H:%M:%S"
 
-    # 控制台 handler
+    # 控制台 handler（使用 UTF-8 安全 handler）
     if log_to_console:
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler = _SafeUTF8StreamHandler(sys.stdout)
         if HAS_COLORLOG:
             console_formatter = colorlog.ColoredFormatter(
                 COLOR_FORMAT,
@@ -125,3 +154,29 @@ def set_global_log_level(level: str):
     logging.root.setLevel(log_level)
     for handler in logging.root.handlers:
         handler.setLevel(log_level)
+
+
+def setup_stdout_encoding():
+    """
+    确保 stdout / stderr 支持 UTF-8 输出。
+
+    在 Windows 系统上，Python 默认使用 GBK 编码输出到控制台，导致
+    emoji 和 Unicode 特殊字符（✓ ✗ ✅ ❌ 📂 🔄 等）抛出
+    UnicodeEncodeError。此函数将 stdout / stderr 重新包装为 UTF-8。
+
+    应在所有入口模块的最顶部（import 之后）调用一次。
+    """
+    for stream_name in ('stdout', 'stderr'):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        try:
+            if hasattr(stream, 'buffer') and stream.buffer is not None:
+                setattr(sys, stream_name,
+                        io.TextIOWrapper(stream.buffer,
+                                         encoding='utf-8',
+                                         errors='replace',
+                                         line_buffering=True))
+        except Exception:
+            # 如果已经包装过或 buffer 不可用，静默跳过
+            pass

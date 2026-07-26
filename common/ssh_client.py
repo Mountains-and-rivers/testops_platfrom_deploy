@@ -66,7 +66,10 @@ class SSHClient:
         self.username = username
         self.port = port
         self.password = password
-        self.key_file = key_file or os.path.expanduser("~/.ssh/id_rsa")
+        # 仅当未提供密码且未指定密钥时才使用默认密钥路径
+        self.key_file = key_file if key_file else (
+            None if password else os.path.expanduser("~/.ssh/id_rsa")
+        )
         self.timeout = timeout
         self.connect_retries = connect_retries
         self.retry_interval = retry_interval
@@ -94,19 +97,25 @@ class SSHClient:
                     "banner_timeout": self.timeout,
                 }
 
-                # 优先使用密钥认证
-                if os.path.exists(self.key_file):
-                    connect_kwargs["key_filename"] = self.key_file
-                elif self.password:
+                # 认证方式选择：
+                # 1. 显式指定密码 → 优先密码认证
+                # 2. 显式指定密钥 → 密钥认证
+                # 3. 都未指定 → 尝试默认密钥 → 回退密码
+                if self.password:
                     connect_kwargs["password"] = self.password
-                else:
-                    # 无密钥也无密码，尝试默认密钥
-                    default_key = os.path.expanduser("~/.ssh/id_rsa")
-                    if os.path.exists(default_key):
-                        connect_kwargs["key_filename"] = default_key
+                elif self.key_file and os.path.exists(self.key_file):
+                    connect_kwargs["key_filename"] = self.key_file
+                elif os.path.exists(os.path.expanduser("~/.ssh/id_rsa")):
+                    connect_kwargs["key_filename"] = os.path.expanduser("~/.ssh/id_rsa")
 
                 self._client.connect(**connect_kwargs)
                 self._connected = True
+
+                # 开启 transport keepalive，防止长连接被中间设备断开
+                transport = self._client.get_transport()
+                if transport:
+                    transport.set_keepalive(30)
+
                 logger.debug(f"SSH 连接成功: {self.username}@{self.host}:{self.port}")
                 return
 

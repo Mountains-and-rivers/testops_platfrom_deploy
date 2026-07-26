@@ -1,12 +1,7 @@
 """
 Stage 6: Calico 网络插件部署
 
-在集群中部署 Calico CNI 网络插件：
-- 下载 Calico manifest
-- 按配置修改 Pod 网段
-- 配置隧道模式（VXLAN / IPIP）
-- kubectl apply 部署
-- 等待 Calico Pods 就绪
+在集群中部署 Calico CNI 网络插件
 """
 
 import os
@@ -28,26 +23,16 @@ logger = get_logger(__name__)
 
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 
-# Calico 官方 manifest URL（国内可使用镜像地址）
-CALICO_MANIFEST_URL = (
-    "https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/"
-    "manifests/calico.yaml"
-)
-
-# 国内镜像加速地址
-CALICO_MANIFEST_MIRROR = (
-    "https://ghproxy.com/https://raw.githubusercontent.com/projectcalico/calico/"
-    "v3.27.0/manifests/calico.yaml"
-)
+# Calico manifest URL（国内优先 ghproxy）
+CALICO_URLS = [
+    "https://ghproxy.net/https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml",
+    "https://mirror.ghproxy.com/https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml",
+    "https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml",
+]
 
 
 def run_cni_deploy(state: WorkflowStateManager) -> None:
-    """
-    在已初始化的集群中部署 Calico 网络插件。
-
-    Args:
-        state: 工作流状态管理器实例
-    """
+    """部署 Calico CNI"""
     logger.info("=" * 50)
     logger.info("Stage 6: 开始 CNI 网络插件部署 (Calico)")
     logger.info("=" * 50)
@@ -59,78 +44,81 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
     if not master_ip:
         raise CNIDeployError("calico", "未找到 Master 节点 IP")
 
-    ssh = SSHClient(host=master_ip, username="root", port=22)
+    node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
+    masters = node_list.get("node_list", {}).get("masters", [])
+    master_cfg = masters[0].get("ssh", {}) if masters else {}
+
+    ssh = SSHClient(
+        host=master_ip,
+        username=master_cfg.get("username", "root"),
+        port=master_cfg.get("port", 22),
+        password=master_cfg.get("password"),
+        key_file=master_cfg.get("key_file"),
+    )
 
     try:
         ssh.connect()
 
-        # 1. 下载 Calico manifest
+        # 1. 下载 manifest
         logger.info("下载 Calico manifest...")
-        # 优先使用国内镜像
-        download_cmd = (
-            f"curl -sL -o /tmp/calico.yaml "
-            f"{CALICO_MANIFEST_MIRROR} || "
-            f"curl -sL -o /tmp/calico.yaml {CALICO_MANIFEST_URL}"
-        )
-        exit_code, _, stderr = ssh.exec_command(download_cmd, timeout=60)
-        if exit_code != 0:
-            raise CNIDeployError("calico", f"manifest 下载失败: {stderr[:200]}")
+        downloaded = False
+        for idx, url in enumerate(CALICO_URLS):
+            logger.info(f"  尝试 [{idx+1}/{len(CALICO_URLS)}]: {url.split('/')[2]}")
+            exit_code, _, _ = ssh.exec_command(
+                f"curl -sL --connect-timeout 10 -o /tmp/calico.yaml '{url}' 2>&1 || echo FAILED",
+                timeout=30
+            )
+            if exit_code == 0 and "FAILED" not in _:
+                _, size, _ = ssh.exec_command("wc -c < /tmp/calico.yaml", timeout=5)
+                if size.strip().isdigit() and int(size.strip()) > 1000:
+                    downloaded = True
+                    logger.info(f"  OK ({size.strip()} bytes)")
+                    break
+        if not downloaded:
+            raise CNIDeployError("calico", "manifest 下载失败")
 
-        # 2. 修改 Pod 网段（如果与默认 192.168.0.0/16 不同）
+        # 2. 修改 Pod 网段
         net = cluster_info.get("cluster_info", {}).get("networking", {})
         pod_cidr = net.get("pod_cidr", "10.244.0.0/16")
         if pod_cidr != "192.168.0.0/16":
-            ssh.exec_command_ok(
-                f"sed -i 's|192.168.0.0/16|{pod_cidr}|g' /tmp/calico.yaml",
-                sudo=True
-            )
-            logger.info(f"Pod 网段已修改为: {pod_cidr}")
+            ssh.exec_command_ok(f"sed -i 's|192.168.0.0/16|{pod_cidr}|g' /tmp/calico.yaml")
+            logger.info(f"Pod 网段 → {pod_cidr}")
 
-        # 3. 配置隧道模式
-        encapsulation = calico_cfg.get("encapsulation", "VXLANCrossSubnet")
-        # 如果选 IPIP 而不是 VXLAN
-        if "IPIP" in encapsulation:
-            ssh.exec_command_ok(
-                "sed -i 's|vxlanMode: Always|vxlanMode: Never|' /tmp/calico.yaml",
-                sudo=True
-            )
-            logger.info(f"隧道模式 → VXLAN (CrossSubnet)")
+        # 3. 替换镜像源为 quay.io（阿里云 quayio 加速，国内唯一可用）
+        ssh.exec_command("sed -i 's|docker.io/calico/|quay.io/calico/|g' /tmp/calico.yaml", timeout=5)
+        logger.info("镜像源 → quay.io")
 
-        # 4. 部署 Calico
+        # 4. 部署
         logger.info("部署 Calico...")
-        exit_code, stdout, stderr = ssh.exec_command(
-            "kubectl apply -f /tmp/calico.yaml", timeout=120
-        )
+        exit_code, stdout, stderr = ssh.exec_command("kubectl apply -f /tmp/calico.yaml", timeout=120)
         if exit_code != 0:
-            raise CNIDeployError("calico", f"kubectl apply 失败: {stderr[:300]}")
+            raise CNIDeployError("calico", f"apply 失败: {stderr[:300]}")
+        logger.info("manifest 已应用")
 
-        logger.info("Calico manifest 已应用")
-
-        # 5. 等待 Calico Pods 就绪
-        logger.info("等待 Calico Pods 就绪（最多 180 秒）...")
+        # 5. 等待就绪
+        logger.info("等待 Calico Pods（最多 300 秒）...")
         wait_cmd = (
-            "kubectl wait --for=condition=ready pod "
-            "-l k8s-app=calico-node -n kube-system --timeout=180s && "
-            "kubectl wait --for=condition=ready pod "
-            "-l k8s-app=calico-kube-controllers -n kube-system --timeout=180s"
+            "kubectl wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s && "
+            "kubectl wait --for=condition=ready pod -l k8s-app=calico-kube-controllers -n kube-system --timeout=300s"
         )
-        exit_code, wait_stdout, wait_stderr = ssh.exec_command(wait_cmd, timeout=200)
-
+        exit_code, _, w_err = ssh.exec_command(wait_cmd, timeout=320)
         if exit_code != 0:
-            # 输出当前状态以便排查
-            _, pod_status, _ = ssh.exec_command(
-                "kubectl get pods -n kube-system | grep calico", timeout=10
-            )
+            _, pod_status, _ = ssh.exec_command("kubectl get pods -n kube-system | grep calico", timeout=10)
             logger.warning(f"Calico Pod 状态:\n{pod_status}")
-            raise CNIDeployError(
-                "calico", f"Pods 未能在超时时间内就绪: {wait_stderr[:200]}"
-            )
+            raise CNIDeployError("calico", f"Pods 未就绪: {w_err[:200]}")
 
-        # 6. 检查节点状态
-        _, node_status, _ = ssh.exec_command("kubectl get nodes", timeout=10)
-        logger.info(f"节点状态:\n{node_status}")
+        # 6. 验证
+        logger.info("安装后扫描...")
+        _, nodes, _ = ssh.exec_command("kubectl get nodes --no-headers 2>/dev/null", timeout=10)
+        ready_cnt = nodes.count("Ready")
+        logger.info(f"  节点: {ready_cnt} Ready")
+        _, coredns, _ = ssh.exec_command(
+            "kubectl get pods -n kube-system -l k8s-app=kube-dns --no-headers 2>/dev/null | grep -c Running || echo 0",
+            timeout=10
+        )
+        logger.info(f"  CoreDNS: {coredns.strip()} Running")
 
-        logger.info("Calico 网络插件部署完成 ✓")
+        logger.info("Calico 部署完成")
 
     except CNIDeployError:
         raise
@@ -141,3 +129,68 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
 
     state.set_global("cni_deployed", True)
     state.set_global("cni_plugin", "calico")
+
+
+def rollback_cni_deploy(state: WorkflowStateManager) -> None:
+    """回滚 Calico"""
+    logger.info("=" * 50)
+    logger.info("Stage 6 Rollback: 回滚 CNI")
+    logger.info("=" * 50)
+
+    master_ip = state.get_global("master_ip")
+    if not master_ip:
+        logger.warning("无 Master IP，跳过")
+        return
+
+    node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
+    masters = node_list.get("node_list", {}).get("masters", [])
+    master_cfg = masters[0].get("ssh", {}) if masters else {}
+
+    ssh = SSHClient(
+        host=master_ip,
+        username=master_cfg.get("username", "root"),
+        port=master_cfg.get("port", 22),
+        password=master_cfg.get("password"),
+        key_file=master_cfg.get("key_file"),
+    )
+
+    try:
+        ssh.connect()
+        # 按 label 全删
+        ssh.exec_command(
+            "kubectl delete ds -n kube-system calico-node --force --grace-period=0 2>/dev/null || true; "
+            "kubectl delete deploy -n kube-system calico-kube-controllers --force --grace-period=0 2>/dev/null || true; "
+            "kubectl delete pods -n kube-system -l k8s-app=calico-node --force --grace-period=0 2>/dev/null || true; "
+            "kubectl delete pods -n kube-system -l k8s-app=calico-kube-controllers --force --grace-period=0 2>/dev/null || true; "
+            "kubectl delete namespace calico-system --force --grace-period=0 2>/dev/null || true; "
+            "kubectl delete namespace tigera-operator --force --grace-period=0 2>/dev/null || true; "
+            "rm -f /tmp/calico.yaml",
+            timeout=120
+        )
+        logger.info("Calico 卸载完成")
+    except Exception as e:
+        logger.warning(f"回滚异常: {e}")
+    finally:
+        ssh.close()
+
+    # 所有节点清 CNI 接口
+    for node in masters + node_list.get("node_list", {}).get("workers", []):
+        sc = node.get("ssh", {})
+        ns = SSHClient(host=node["ip"], username=sc.get("username","root"),
+                      port=sc.get("port",22), password=sc.get("password"))
+        try:
+            ns.connect()
+            ns.exec_command(
+                "ip link delete cni0 2>/dev/null || true; "
+                "ip link delete cali* 2>/dev/null || true; "
+                "ip link delete vxlan.calico 2>/dev/null || true; "
+                "rm -rf /etc/cni/net.d/* 2>/dev/null || true",
+                timeout=10
+            )
+        except Exception:
+            pass
+        finally:
+            ns.close()
+
+    logger.info("CNI 回滚完成")
+    state.set_global("cni_deployed", False)
