@@ -1,0 +1,71 @@
+# ============================================================
+# 整套 TestOps 平台顺序部署流水线定义
+# ============================================================
+
+pipeline:
+  name: "full_stack_install"
+  description: "TestOps 全平台顺序部署流水线"
+  version: "0.1.0"
+
+  # 全局参数
+  global:
+    stop_on_failure: true               # 任何组件失败即终止后续部署
+    parallel_components: false           # 是否并行部署无依赖关系的组件
+    pre_check_before_each: true          # 每个组件部署前执行预检
+    auto_backup_before_deploy: true      # 部署前自动备份已有数据
+
+  # 部署阶段（按依赖顺序）
+  phases:
+    # ----- 阶段 1: 基础设施 -----
+    - name: "infrastructure"
+      description: "基础设施层部署"
+      components:
+        - name: "k8s_cluster_deploy"
+          required: true                 # 必须成功的组件
+          timeout_minutes: 60
+          config_overrides: {}           # 覆盖组件默认配置
+          post_deploy_verify: true
+
+    # ----- 阶段 2: 可观测性 -----
+    - name: "observability"
+      description: "监控与可观测性层部署"
+      depends_on: ["infrastructure"]
+      components:
+        - name: "prometheus_stack_deploy"
+          required: true
+          timeout_minutes: 30
+          post_deploy_verify: true
+
+    # ----- 阶段 3: 平台服务 -----
+    - name: "platform_services"
+      description: "测试平台服务层部署"
+      depends_on: ["infrastructure"]
+      components:
+        - name: "wikijs_deploy"
+          required: false                # 非关键组件失败不阻塞
+          timeout_minutes: 15
+          post_deploy_verify: true
+
+        - name: "zentao_deploy"
+          required: true
+          timeout_minutes: 20
+          post_deploy_verify: true
+
+        - name: "metersphere_deploy"
+          required: true
+          timeout_minutes: 30
+          depends_on: ["prometheus_stack_deploy"]
+          post_deploy_verify: true
+
+        - name: "ai_test_suite_deploy"
+          required: false
+          timeout_minutes: 20
+          post_deploy_verify: true
+
+  # 部署后操作
+  post_deploy:
+    - action: "smoke_test"
+      description: "全平台冒烟测试"
+    - action: "generate_report"
+      description: "生成部署报告"
+      output_dir: "reports/global_summary/"

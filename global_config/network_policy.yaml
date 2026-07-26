@@ -1,0 +1,102 @@
+# ============================================================
+# 通用网段 / 防火墙基础策略配置
+# ============================================================
+
+network_policy:
+  # 网络规划
+  network:
+    # 管理网络（SSH 连接通道）
+    management_cidr: "10.0.0.0/16"
+
+    # 业务网络（应用对外暴露）
+    service_cidr: "172.16.0.0/20"
+
+    # Pod 网络（K8s Pod 通信网段）
+    pod_cidr: "10.244.0.0/16"
+
+    # Service 网络（K8s ClusterIP 网段）
+    cluster_service_cidr: "10.96.0.0/12"
+
+    # 存储网络（NFS/Ceph 等存储后端）
+    storage_cidr: "192.168.100.0/24"
+
+    # VIP（虚拟 IP，用于 HAProxy/Keepalived，高可用场景）
+    vip_range: "10.0.255.0/28"
+
+  # 防火墙策略
+  firewall:
+    # 防火墙管理工具
+    manager: "firewalld"               # firewalld | iptables | ufw
+
+    # 默认策略
+    default_incoming: "drop"
+    default_outgoing: "accept"
+
+    # 全局开放端口（所有节点通用）
+    common_open_ports:
+      tcp:
+        - 22                           # SSH
+        - 80                           # HTTP
+        - 443                          # HTTPS
+      udp: []
+
+    # K8s Master 节点额外端口
+    k8s_master_ports:
+      tcp:
+        - 6443                         # Kubernetes API Server
+        - 2379                         # etcd client
+        - 2380                         # etcd peer
+        - 10250                        # kubelet API
+        - 10251                        # kube-scheduler
+        - 10252                        # kube-controller-manager
+        - 10257                        # kube-controller-manager (secure)
+        - 10259                        # kube-scheduler (secure)
+      udp: []
+
+    # K8s Node 节点额外端口
+    k8s_node_ports:
+      tcp:
+        - 10250                        # kubelet API
+        - 30000-32767                  # NodePort 服务范围
+      udp:
+        - 8472                         # Flannel VXLAN (如果用 Flannel)
+        - 4789                         # Calico VXLAN
+
+    # 监控组件额外端口
+    monitoring_ports:
+      tcp:
+        - 9090                         # Prometheus
+        - 9093                         # Alertmanager
+        - 3000                         # Grafana
+        - 9100                         # Node Exporter
+      udp: []
+
+    # 组件内部互通端口
+    internal_ports:
+      tcp:
+        - 3306                         # MySQL
+        - 5432                         # PostgreSQL
+        - 6379                         # Redis
+        - 27017                        # MongoDB
+        - 9200                         # Elasticsearch
+        - 5672                         # RabbitMQ
+        - 9092                         # Kafka
+      udp:
+        - 53                           # CoreDNS (K8s)
+
+  # IP 白名单（允许访问管理端口的来源 IP）
+  admin_whitelist:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+  # 禁止访问的端口（安全加固）
+  blocked_ports:
+    tcp:
+      - 23                            # Telnet
+      - 135                           # MSRPC
+      - 445                           # SMB
+    udp:
+      - 137
+      - 138
+      - 139

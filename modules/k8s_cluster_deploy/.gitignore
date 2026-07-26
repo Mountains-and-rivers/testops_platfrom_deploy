@@ -1,0 +1,13 @@
+# 运行时产物
+runtime/
+
+# 报告输出
+reports/*.txt
+reports/*.json
+reports/*.yaml
+reports/*.pdf
+
+# 临时文件
+*.tmp
+*.swp
+temp_cache/

@@ -1,0 +1,41 @@
+# ============================================================
+# SSH 连接公共参数配置
+# ============================================================
+
+ssh_global:
+  # 连接参数
+  connection:
+    port: 22                          # 默认 SSH 端口
+    timeout: 30                       # 连接超时（秒）
+    connect_retries: 3                # 连接失败重试次数
+    retry_interval: 5                 # 重试间隔（秒）
+    keepalive_interval: 60            # 心跳保活间隔（秒）
+
+  # 并发控制
+  concurrency:
+    max_parallel_sessions: 10         # 最大并行 SSH 连接数
+    session_timeout: 3600             # 单次会话最大时长（秒）
+    command_timeout: 600              # 单条命令执行超时（秒）
+
+  # 认证配置
+  auth:
+    method: "key"                     # key | password | key_then_password
+    key_file: "~/.ssh/id_rsa"         # 默认私钥路径
+    key_type: "rsa"                   # rsa | ed25519 | ecdsa
+    allow_agent: true                 # 是否允许 ssh-agent 转发
+    password_fallback: false          # key 认证失败时是否回退到密码
+
+  # 安全策略
+  security:
+    strict_host_key_checking: false   # 严格主机密钥检查
+    known_hosts_file: "~/.ssh/known_hosts"
+    allowed_ciphers: []               # 留空使用默认加密套件列表
+    allowed_macs: []                  # 留空使用默认 MAC 算法列表
+
+  # 重试与容错
+  retry:
+    max_retries: 3                    # 命令执行失败最大重试次数
+    retryable_exit_codes: [1, 255]    # 可重试的退出码
+    retry_delay: 10                   # 重试间隔（秒）
+    exponential_backoff: true         # 指数退避
+    backoff_multiplier: 2

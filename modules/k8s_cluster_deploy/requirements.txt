@@ -1,0 +1,2 @@
+# K8s Cluster Deploy 模块私有依赖
+# 此模块无额外私有依赖，全部复用项目顶层 requirements.txt

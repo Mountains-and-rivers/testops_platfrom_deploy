@@ -1,0 +1,59 @@
+# ============================================================
+# K8s 集群节点清单配置
+# ============================================================
+
+node_list:
+  # ----- Master 节点 -----
+  masters:
+    - hostname: "k8s-master-01"
+      ip: "10.0.0.10"
+      ssh:
+        port: 22
+        username: "root"
+        # 节点级 SSH 认证（覆盖全局配置）
+        # key_file: "~/.ssh/id_rsa"
+        # password: ""
+      role: "control-plane"                # control-plane | control-plane,etcd
+      taints: []                           # 如不需要调度 Pod，设置 ["node-role.kubernetes.io/control-plane:NoSchedule"]
+
+  # ----- Worker 节点 -----
+  workers:
+    - hostname: "k8s-node-01"
+      ip: "10.0.0.21"
+      ssh:
+        port: 22
+        username: "root"
+      role: "worker"
+      labels:
+        node-role.kubernetes.io/worker: ""
+        testops.io/app: "true"
+      taints: []
+
+    - hostname: "k8s-node-02"
+      ip: "10.0.0.22"
+      ssh:
+        port: 22
+        username: "root"
+      role: "worker"
+      labels:
+        node-role.kubernetes.io/worker: ""
+        testops.io/app: "true"
+      taints: []
+
+    - hostname: "k8s-node-03"
+      ip: "10.0.0.23"
+      ssh:
+        port: 22
+        username: "root"
+      role: "worker"
+      labels:
+        node-role.kubernetes.io/worker: ""
+        testops.io/app: "true"
+      taints: []
+
+  # ----- 节点选择策略 -----
+  scheduling:
+    # 部署组件时优先调度的节点标签选择器
+    default_node_selector: {}
+    # 容忍度配置
+    default_tolerations: []

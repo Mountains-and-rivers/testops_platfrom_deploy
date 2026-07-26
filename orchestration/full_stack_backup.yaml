@@ -1,0 +1,67 @@
+# ============================================================
+# 全平台统一批量备份流水线定义
+# ============================================================
+
+pipeline:
+  name: "full_stack_backup"
+  description: "TestOps 全平台统一批量备份流水线"
+  version: "0.1.0"
+
+  # 全局参数
+  global:
+    stop_on_failure: false
+    backup_dir: "/opt/testops/backup"    # 远程备份根目录
+    local_backup_dir: "reports/global_summary/backup"  # 本地汇总目录
+    compress: true                        # 是否压缩
+    encrypt: false                        # 是否加密
+
+  # 备份计划（按组件顺序，但各组件独立备份）
+  components:
+    - name: "k8s_cluster_deploy"
+      backup_items:
+        - "etcd_snapshot"
+        - "certificates"
+        - "kubeadm_config"
+      timeout_minutes: 15
+      priority: "critical"                # critical | high | normal | low
+
+    - name: "prometheus_stack_deploy"
+      backup_items:
+        - "prometheus_data"
+        - "grafana_dashboards"
+        - "alertmanager_config"
+      timeout_minutes: 30
+      priority: "high"
+
+    - name: "wikijs_deploy"
+      backup_items:
+        - "database_dump"
+        - "content_export"
+      timeout_minutes: 10
+      priority: "normal"
+
+    - name: "zentao_deploy"
+      backup_items:
+        - "database_dump"
+        - "attachment_files"
+      timeout_minutes: 20
+      priority: "high"
+
+    - name: "metersphere_deploy"
+      backup_items:
+        - "database_dump"
+        - "test_reports"
+      timeout_minutes: 20
+      priority: "high"
+
+    - name: "ai_test_suite_deploy"
+      backup_items:
+        - "config_export"
+      timeout_minutes: 5
+      priority: "normal"
+
+  # 备份保留策略
+  retention:
+    max_backups: 30
+    max_age_days: 90
+    auto_cleanup: true

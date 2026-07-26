@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Runtime artifacts
+runtime/
+*.state
+*.log
+temp_cache/
+
+# Reports (keep directory structure, ignore generated files)
+reports/**/*.pdf
+reports/**/*.html
+reports/**/*.json
+reports/**/*.tar.gz
+
+# Sensitive config
+*.key
+*.pem
+*_secret.yaml
+*_credentials.yaml
+credentials/
+
+# OS
+Thumbs.db
+Desktop.ini

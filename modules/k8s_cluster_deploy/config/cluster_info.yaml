@@ -1,0 +1,70 @@
+# ============================================================
+# K8s 集群基础信息配置
+# ============================================================
+
+cluster_info:
+  # 集群标识
+  cluster_name: "testops-prod"
+  cluster_domain: "testops.local"
+
+  # 网络规划
+  networking:
+    pod_cidr: "10.244.0.0/16"              # Pod 网络 CIDR
+    service_cidr: "10.96.0.0/12"           # Service ClusterIP CIDR
+    service_node_port_range: "30000-32767"  # NodePort 端口范围
+
+  # API Server 配置
+  api_server:
+    # 高可用模式下的虚拟 IP 或负载均衡地址
+    control_plane_endpoint: "k8s-api.testops.local:6443"
+    # 或直接使用 Master 节点 IP
+    # control_plane_endpoint: "10.0.0.10:6443"
+    advertise_address: ""                   # 留空自动检测
+    bind_port: 6443
+
+  # 网络插件
+  cni:
+    plugin: "calico"                        # calico | flannel | cilium
+    calico:
+      version: "v3.27.0"
+      encapsulation: "VXLANCrossSubnet"     # VXLANAlways | VXLANCrossSubnet | IPIP | None
+      block_size: 26
+      nat_outgoing: true
+
+  # DNS 配置
+  dns:
+    plugin: "coredns"
+    upstream_nameservers:
+      - "223.5.5.5"
+      - "223.6.6.6"
+    cluster_domain: "cluster.local"
+
+  # etcd 配置
+  etcd:
+    data_dir: "/var/lib/etcd"
+    # 高可用场景下 etcd 节点数（奇数，建议 3/5）
+    cluster_size: 1
+
+  # 容器运行时
+  container_runtime:
+    engine: "containerd"
+    version: "1.7.13"
+    data_root: "/var/lib/containerd"
+    # 镜像仓库认证（如需要）
+    registry_auth: []
+
+  # kube-proxy 模式
+  kube_proxy_mode: "ipvs"                   # iptables | ipvs
+
+  # 证书配置
+  certificates:
+    # 证书有效期
+    ca_cert_days: 36500                     # 100 年
+    api_server_cert_days: 3650              # 10 年
+    front_proxy_cert_days: 3650
+    # 自动续签
+    auto_renew: true
+    renew_before_days: 30
+
+  # 特性门控（Feature Gates）
+  feature_gates: []

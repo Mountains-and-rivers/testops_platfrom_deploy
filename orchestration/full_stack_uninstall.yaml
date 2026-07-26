@@ -1,0 +1,56 @@
+# ============================================================
+# 整套 TestOps 平台逆序批量卸载流水线定义
+# ============================================================
+
+pipeline:
+  name: "full_stack_uninstall"
+  description: "TestOps 全平台逆序批量卸载流水线"
+  version: "0.1.0"
+
+  # 全局参数
+  global:
+    stop_on_failure: false              # 卸载时尽量继续（一个组件卸载失败不阻塞后续）
+    require_confirmation: true           # 卸载前必须确认
+    auto_final_backup: true              # 卸载前自动备份
+    force: false                         # 是否强制卸载（跳过所有确认）
+
+  # 卸载阶段（严格逆序：先卸载上层应用，最后卸载基础设施）
+  phases:
+    # ----- 阶段 1: 上层应用（先进后出） -----
+    - name: "applications"
+      description: "上层测试应用卸载"
+      components:
+        - name: "ai_test_suite_deploy"
+          timeout_minutes: 15
+        - name: "metersphere_deploy"
+          timeout_minutes: 20
+        - name: "zentao_deploy"
+          timeout_minutes: 15
+        - name: "wikijs_deploy"
+          timeout_minutes: 10
+
+    # ----- 阶段 2: 可观测性 -----
+    - name: "observability"
+      description: "监控组件卸载"
+      depends_on: ["applications"]       # 等上层应用全部卸载完再卸载监控
+      components:
+        - name: "prometheus_stack_deploy"
+          timeout_minutes: 20
+
+    # ----- 阶段 3: 基础设施（最后卸载） -----
+    - name: "infrastructure"
+      description: "基础设施卸载（K8s 集群销毁）"
+      depends_on: ["observability"]
+      components:
+        - name: "k8s_cluster_deploy"
+          timeout_minutes: 30
+          # K8s 集群卸载需要特别谨慎
+          extra_confirmation: true
+
+  # 卸载后清理
+  post_uninstall:
+    - action: "cleanup_global_configs"
+      description: "清理全局配置文件（可选）"
+      optional: true
+    - action: "generate_report"
+      description: "生成卸载报告"

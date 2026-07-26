@@ -1,0 +1,104 @@
+# ============================================================
+# K8s 集群卸载执行规则配置
+# ============================================================
+
+uninstall_rules:
+  # ----- 卸载顺序 -----
+  # 严格逆序执行（与安装顺序相反）
+  order:
+    - "drain_worker_nodes"                 # 1. 逐出 worker 节点上的 Pod
+    - "remove_worker_nodes"                # 2. 将 worker 节点从集群移除
+    - "remove_cni"                         # 3. 删除 CNI 网络插件
+    - "drain_master_nodes"                 # 4. 逐出 master 节点上的 Pod（如有）
+    - "reset_master"                       # 5. kubeadm reset master
+    - "remove_k8s_packages"                # 6. 卸载 kubeadm/kubectl/kubelet
+    - "remove_containerd"                  # 7. 卸载容器运行时
+    - "cleanup_system"                     # 8. 清理系统配置（内核参数、模块等）
+
+  # ----- 各步骤详细规则 -----
+
+  drain_worker_nodes:
+    # 逐出超时时间（秒）
+    timeout: 300
+    # 是否强制逐出（跳过 PDB）
+    force: true
+    # 是否忽略 DaemonSet 管理的 Pod
+    ignore_daemonsets: true
+    # 是否删除节点上的 emptyDir 数据
+    delete_emptydir_data: true
+
+  remove_worker_nodes:
+    # 是否在移除前先 drain
+    drain_first: true
+    # 移除后是否重启节点
+    reboot_after_remove: false
+
+  remove_cni:
+    # 是否等待所有 CNI Pod 终止
+    wait_for_termination: true
+    wait_timeout: 120
+
+  drain_master_nodes:
+    timeout: 300
+    force: true
+    ignore_daemonsets: true
+    # Master 节点是否容忍驱逐
+    skip_if_uncordoned: true
+
+  reset_master:
+    # kubeadm reset 额外参数
+    kubeadm_reset_flags:
+      - "--force"
+      - "--cri-socket=unix:///var/run/containerd/containerd.sock"
+    # 是否清理证书目录
+    cleanup_certs_dir: true
+    # 是否清理 etcd 数据目录
+    cleanup_etcd_data: true
+
+  remove_k8s_packages:
+    # 是否保留配置文件（以便重新安装时恢复）
+    keep_config: false
+    # 要移除的包列表
+    packages:
+      - kubeadm
+      - kubectl
+      - kubelet
+    # 是否同时清理依赖包
+    autoremove_deps: true
+
+  remove_containerd:
+    keep_config: false
+    keep_data: false                       # 删除 /var/lib/containerd 数据
+    packages:
+      - containerd.io
+
+  cleanup_system:
+    # 是否恢复内核参数
+    restore_sysctl: false
+    # 是否恢复防火墙
+    restore_firewall: false
+    # 是否清理 CNI 网桥/接口
+    cleanup_cni_interfaces: true
+    # 是否清理 iptables 规则
+    cleanup_iptables: true
+    # 要删除的残留目录
+    cleanup_directories:
+      - /etc/kubernetes/
+      - /var/lib/kubelet/
+      - /etc/cni/
+      - /opt/cni/
+      - /var/lib/etcd/
+
+  # ----- 安全检查 -----
+  safety:
+    # 卸载前必须确认
+    require_confirmation: true
+    # 确认超时（秒）
+    confirmation_timeout: 30
+    # 是否在执行前自动创建最终备份
+    auto_final_backup: true
+    # 白名单：受保护的命名空间
+    protected_namespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease

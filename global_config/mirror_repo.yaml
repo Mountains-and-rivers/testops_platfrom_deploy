@@ -1,0 +1,74 @@
+# ============================================================
+# 全局镜像源 / YUM 源 / 软件下载源配置
+# ============================================================
+
+mirror_repo:
+  # YUM / DNF 软件源
+  yum:
+    base:
+      name: "CentOS-Base"
+      baseurl: "https://mirrors.aliyun.com/centos/$releasever/os/$basearch/"
+      enabled: true
+      gpgcheck: false
+    epel:
+      name: "EPEL"
+      baseurl: "https://mirrors.aliyun.com/epel/$releasever/$basearch/"
+      enabled: true
+      gpgcheck: false
+    docker_ce:
+      name: "Docker-CE"
+      baseurl: "https://mirrors.aliyun.com/docker-ce/linux/centos/$releasever/$basearch/stable"
+      enabled: true
+      gpgcheck: false
+    kubernetes:
+      name: "Kubernetes"
+      baseurl: "https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-$basearch/"
+      enabled: true
+      gpgcheck: false
+      gpgkey: "https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg"
+
+  # APT 软件源（Ubuntu/Debian）
+  apt:
+    ubuntu:
+      archive: "https://mirrors.aliyun.com/ubuntu/"
+      security: "https://mirrors.aliyun.com/ubuntu/"
+    kubernetes:
+      deb: "https://mirrors.aliyun.com/kubernetes/apt"
+      gpgkey: "https://mirrors.aliyun.com/kubernetes/apt/doc/apt-key.gpg"
+
+  # 容器镜像仓库
+  container_registry:
+    # 主仓库（内网优先，回退公网）
+    primary: "registry.testops.local"
+    fallback: "registry.cn-hangzhou.aliyuncs.com"
+
+    # 各组件镜像前缀映射
+    mirrors:
+      k8s_gcr_io: "registry.cn-hangzhou.aliyuncs.com/google_containers"
+      docker_hub: "registry.cn-hangzhou.aliyuncs.com/dockerhub"
+      quay_io: "registry.cn-hangzhou.aliyuncs.com/quayio"
+      ghcr_io: "registry.cn-hangzhou.aliyuncs.com/ghcr"
+
+    # 镜像拉取策略
+    pull_policy: "IfNotPresent"        # Always | IfNotPresent | Never
+
+  # 二进制/软件包下载源
+  software_downloads:
+    # 下载缓存目录（本地缓存避免重复下载）
+    cache_dir: "/opt/testops/cache"
+    sources:
+      containerd:
+        url: "https://github.com/containerd/containerd/releases/download"
+        version: "1.7.13"
+      runc:
+        url: "https://github.com/opencontainers/runc/releases/download"
+        version: "1.1.12"
+      cni_plugins:
+        url: "https://github.com/containernetworking/plugins/releases/download"
+        version: "1.4.0"
+      calico:
+        url: "https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests"
+        version: "3.27.0"
+      etcd:
+        url: "https://github.com/etcd-io/etcd/releases/download"
+        version: "3.5.12"

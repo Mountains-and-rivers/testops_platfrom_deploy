@@ -1,0 +1,77 @@
+# ============================================================
+# K8s 及相关组件目标版本清单
+# ============================================================
+
+software_version:
+  # ----- Kubernetes 版本 -----
+  kubernetes:
+    # 默认安装版本
+    default: "1.29.6"
+    # 允许选择的候选版本列表
+    available:
+      - "1.27.16"
+      - "1.28.12"
+      - "1.29.6"
+      - "1.30.2"
+    # 各版本对应的组件包版本 (kubeadm / kubectl / kubelet)
+    package_repo: "aliyun"                  # aliyun | google | custom
+
+  # ----- etcd 版本 -----
+  etcd:
+    default: "3.5.12"
+    available:
+      - "3.5.11"
+      - "3.5.12"
+
+  # ----- 容器运行时 -----
+  containerd:
+    default: "1.7.13"
+    available:
+      - "1.7.11"
+      - "1.7.13"
+      - "1.7.15"
+
+  # ----- runc 版本 -----
+  runc:
+    default: "1.1.12"
+    available:
+      - "1.1.10"
+      - "1.1.12"
+
+  # ----- CNI 插件版本 -----
+  cni_plugins:
+    default: "1.4.0"
+    available:
+      - "1.3.0"
+      - "1.4.0"
+
+  # ----- CNI 网络插件 -----
+  calico:
+    default: "v3.27.0"
+    available:
+      - "v3.26.4"
+      - "v3.27.0"
+      - "v3.27.3"
+
+  # ----- CoreDNS 版本 -----
+  coredns:
+    default: "v1.11.1"
+
+  # ----- pause 镜像版本 -----
+  pause:
+    default: "3.9"
+
+  # ----- 版本兼容性矩阵（仅供参考） -----
+  compatibility:
+    kubernetes_1_27:
+      containerd: ">=1.6.0,<1.8.0"
+      calico: ">=3.26.0,<3.28.0"
+    kubernetes_1_28:
+      containerd: ">=1.6.0,<1.8.0"
+      calico: ">=3.26.0,<3.28.0"
+    kubernetes_1_29:
+      containerd: ">=1.7.0,<1.8.0"
+      calico: ">=3.27.0,<3.28.0"
+    kubernetes_1_30:
+      containerd: ">=1.7.0,<1.8.0"
+      calico: ">=3.27.0,<3.29.0"
