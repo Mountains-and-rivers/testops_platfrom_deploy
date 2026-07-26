@@ -4,6 +4,24 @@
 
 ---
 
+## 集群环境信息
+
+| 主机名 | IP | 角色 | CPU | 内存 | 磁盘 | 操作系统 | 内核版本 |
+|--------|-----|------|-----|------|------|---------|---------|
+| master | 192.168.0.105 | control-plane | 6 Cores | 3.5 Gi | 37G | CentOS Stream 9 | 5.14.0-725.el9.x86_64 |
+| node01 | 192.168.0.102 | worker | 4 Cores | 7.2 Gi | 70G | CentOS Stream 9 | 5.14.0-725.el9.x86_64 |
+| node02 | 192.168.0.106 | worker | 6 Cores | 5.2 Gi | 37G | CentOS Stream 9 | 5.14.0-725.el9.x86_64 |
+
+| 组件 | 版本 |
+|------|------|
+| Kubernetes | v1.36.3 |
+| Containerd | v1.7.29 |
+| Calico | v3.27.0 |
+| Pod CIDR | 10.244.0.0/16 |
+| Service CIDR | 10.96.0.0/12 |
+
+---
+
 ## 架构概览
 
 ```
