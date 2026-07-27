@@ -1,0 +1,31 @@
+# K8s PVC — 附件 / 插件持久化存储
+# 仅挂载 /data 目录，源码、日志、tmp 不持久化
+---
+# 附件 + 上传文件 PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zentao-data-pvc
+  namespace: ${NAMESPACE}
+spec:
+  storageClassName: ${STORAGE_CLASS}
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: ${DATA_PVC_SIZE}
+
+---
+# 配置文件 PVC（my.php）
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zentao-config-pvc
+  namespace: ${NAMESPACE}
+spec:
+  storageClassName: ${STORAGE_CLASS}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: ${CONFIG_PVC_SIZE}

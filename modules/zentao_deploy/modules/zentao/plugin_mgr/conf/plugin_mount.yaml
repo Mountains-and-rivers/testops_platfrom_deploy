@@ -1,0 +1,23 @@
+# 禅道插件持久化挂载配置模板
+# 说明: 每个 PVC 子路径对应 /var/www/zentaopms 下的模块子目录
+# 安装插件后自动挂载到对应子目录，确保容器重建后插件不丢失
+
+mounts:
+  # 官方在线安装的插件 -> /var/www/zentaopms/module/<plugin_name>/
+  - pvc: zentao-data-pvc
+    subPath: "module"
+    containerPath: "/var/www/zentaopms/module"
+
+  # 离线安装的自定义扩展 -> /var/www/zentaopms/extension/custom/
+  - pvc: zentao-data-pvc
+    subPath: "extension"
+    containerPath: "/var/www/zentaopms/extension"
+
+  # 插件配置文件持久化
+  - pvc: zentao-config-pvc
+    subPath: "config/ext"
+    containerPath: "/var/www/zentaopms/config/ext"
+
+# 插件安装时需要 PHP zip 扩展，已在 Dockerfile 构建阶段编译
+# 在线安装: php /var/www/zentaopms/bin/ztcli.php plugin-install <name>
+# 离线安装: 将 .zip 上传到 PVC 后执行上述命令

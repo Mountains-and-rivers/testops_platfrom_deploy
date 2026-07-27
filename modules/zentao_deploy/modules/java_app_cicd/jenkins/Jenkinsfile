@@ -1,0 +1,102 @@
+// ============================================================
+// Jenkinsfile — Java 业务应用 CI/CD 流水线
+// 流程: Git拉取 → SonarQube扫描 → Maven构建 → Docker镜像 → Harbor → K8s部署
+// ============================================================
+pipeline {
+    agent any
+
+    environment {
+        // 镜像仓库
+        REGISTRY = 'harbor.testops.local'
+        DOCKER_CREDS = credentials('harbor-credentials')
+        // SonarQube
+        SONAR_TOKEN = credentials('sonarqube-token')
+        SONAR_HOST = 'http://sonarqube.testops.local:9000'
+        // K8s
+        KUBECONFIG = credentials('k8s-kubeconfig')
+        // 镜像信息
+        APP_NAME = 'java-app'
+        IMAGE_TAG = "${GIT_COMMIT.take(7)}-${BUILD_NUMBER}"
+    }
+
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['test', 'staging'], description: '部署环境')
+        booleanParam(name: 'SKIP_SONAR', defaultValue: false, description: '跳过SonarQube扫描')
+        booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: '跳过单元测试')
+    }
+
+    stages {
+
+        stage('1. Checkout') {
+            steps {
+                script { echo ">>> 拉取源码分支: ${env.GIT_BRANCH}" }
+                checkout scm
+            }
+        }
+
+        stage('2. SonarQube Scan') {
+            when { expression { !params.SKIP_SONAR } }
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        sonar-scanner \
+                            -Dsonar.projectKey=testops-java-app \
+                            -Dsonar.sources=src \
+                            -Dsonar.sourceEncoding=UTF-8 \
+                            -Dsonar.java.binaries=target/classes
+                    '''
+                }
+            }
+        }
+
+        stage('3. Quality Gate') {
+            when { expression { !params.SKIP_SONAR } }
+            steps {
+                script {
+                    def qg = waitForQualityGate()
+                    if (qg.status != 'OK') { error "质量门禁未通过: ${qg.status}" }
+                }
+            }
+        }
+
+        stage('4. Maven Build') {
+            steps {
+                script {
+                    def cmd = 'mvn clean package'
+                    if (params.SKIP_TESTS) { cmd += ' -DskipTests' }
+                    sh cmd
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                }
+            }
+        }
+
+        stage('5. Docker Build & Push') {
+            steps {
+                script {
+                    sh """
+                        docker build -t ${REGISTRY}/testops/${APP_NAME}:${IMAGE_TAG} .
+                        echo "${DOCKER_CREDS_PSW}" | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin
+                        docker push ${REGISTRY}/testops/${APP_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('6. Deploy to K8s') {
+            steps {
+                sh """
+                    kubectl set image deployment/${APP_NAME} \
+                        ${APP_NAME}=${REGISTRY}/testops/${APP_NAME}:${IMAGE_TAG} \
+                        -n ${params.DEPLOY_ENV}
+                    kubectl rollout status deployment/${APP_NAME} \
+                        -n ${params.DEPLOY_ENV} --timeout=120s
+                """
+            }
+        }
+    }
+
+    post {
+        success { echo "流水线成功" }
+        failure { echo "流水线失败" }
+    }
+}

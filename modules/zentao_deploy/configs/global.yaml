@@ -1,0 +1,52 @@
+# ============================================================
+# Zentao Deploy — 全局配置文件
+# 所有模块共享的统一配置入口
+# ============================================================
+
+# Harbor 私有镜像仓库
+harbor:
+  url: "https://harbor.testops.local"
+  username: "admin"
+  password: ""              # 通过环境变量 HARBOR_PASSWORD 覆盖
+  project: "testops"
+  image_name: "zentao"
+  image_tag: "21.2"
+
+# Kubernetes 集群信息
+kubernetes:
+  kubeconfig: "~/.kube/config"
+  namespace: "zentao"
+  ingress_host: "zentao.testops.local"
+  storage_class: "nfs-client"
+
+# 外部 MySQL 数据库（独立部署，非 K8s 内）
+mysql:
+  host: "192.168.0.100"
+  port: 3306
+  user: "zentao"
+  password: ""              # 通过环境变量 MYSQL_PASSWORD 覆盖
+  database: "zentao"
+  charset: "utf8mb4"
+
+# 禅道编译服务器
+build_server:
+  host: "192.168.0.100"
+  port: 22
+  username: "root"
+  password: ""              # 通过环境变量 BUILD_SERVER_PASSWORD 覆盖
+  build_dir: "/opt/build/zentaopms"
+
+# 禅道版本
+zentao:
+  version: "21.2"
+  source_url: "https://github.com/easysoft/zentaopms"
+  source_mirror: "https://gitee.com/easysoft/zentaopms"
+  php_version: "8.1.27"
+  httpd_version: "2.4.62"
+  container_port: 8080
+
+# PVC 配置
+persistence:
+  data_pvc_size: "20Gi"       # 附件/上传文件
+  config_pvc_size: "1Gi"      # 配置文件 my.php
+  backup_pvc_size: "100Gi"    # 备份存储

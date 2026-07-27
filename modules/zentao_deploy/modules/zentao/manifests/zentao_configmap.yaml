@@ -1,0 +1,12 @@
+# 禅道 K8s ConfigMap（非敏感配置）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zentao-config
+  namespace: ${NAMESPACE}
+data:
+  php-memory-limit: "512M"
+  php-post-max-size: "100M"
+  php-upload-max-filesize: "100M"
+  php-max-execution-time: "300"
+  php-timezone: "Asia/Shanghai"

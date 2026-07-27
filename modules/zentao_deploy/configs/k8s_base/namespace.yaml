@@ -1,0 +1,8 @@
+# K8s Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: zentao
+    app.kubernetes.io/part-of: testops-platform

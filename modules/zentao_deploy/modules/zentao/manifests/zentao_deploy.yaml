@@ -1,0 +1,79 @@
+# 禅道 K8s Deployment
+# 仅包含 Web 应用容器，MySQL 外部独立部署
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zentao
+  namespace: ${NAMESPACE}
+  labels:
+    app: zentao
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: zentao
+  template:
+    metadata:
+      labels:
+        app: zentao
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values: ["amd64"]
+      containers:
+      - name: zentao
+        image: ${REGISTRY}/${HARBOR_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: ZT_MYSQL_HOST
+          value: "${MYSQL_HOST}"
+        - name: ZT_MYSQL_PORT
+          value: "${MYSQL_PORT}"
+        - name: ZT_MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: zentao-secret
+              key: mysql-user
+        - name: ZT_MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: zentao-secret
+              key: mysql-password
+        - name: ZT_MYSQL_DB
+          valueFrom:
+            secretKeyRef:
+              name: zentao-secret
+              key: mysql-database
+        resources:
+          requests: { cpu: "250m", memory: "512Mi" }
+          limits:   { cpu: "2", memory: "2Gi" }
+        volumeMounts:
+        - name: zentao-data
+          mountPath: /var/www/zentaopms/www/data
+        - name: zentao-config-vol
+          mountPath: /var/www/zentaopms/config
+        livenessProbe:
+          httpGet: { path: /, port: 8080 }
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet: { path: /, port: 8080 }
+          initialDelaySeconds: 15
+          periodSeconds: 10
+      volumes:
+      - name: zentao-data
+        persistentVolumeClaim:
+          claimName: zentao-data-pvc
+      - name: zentao-config-vol
+        persistentVolumeClaim:
+          claimName: zentao-config-pvc

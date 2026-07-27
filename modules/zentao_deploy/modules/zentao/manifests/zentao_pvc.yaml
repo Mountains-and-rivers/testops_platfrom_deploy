@@ -1,0 +1,27 @@
+# 禅道持久化存储 PVC
+# 仅挂载 /data 目录下的附件和插件
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zentao-data-pvc
+  namespace: ${NAMESPACE}
+spec:
+  storageClassName: ${STORAGE_CLASS}
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: ${DATA_PVC_SIZE}
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zentao-config-pvc
+  namespace: ${NAMESPACE}
+spec:
+  storageClassName: ${STORAGE_CLASS}
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: ${CONFIG_PVC_SIZE}
