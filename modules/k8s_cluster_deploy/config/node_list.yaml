@@ -7,7 +7,7 @@ node_list:
   # ----- Master 节点 -----
   masters:
     - hostname: "master"         # ← 改成你的 Master 主机名
-      ip: "192.168.0.105"                   # ← 改成你的 Master IP
+      ip: "192.168.0.103"                   # ← 改成你的 Master IP
       ssh:
         port: 22
         username: "root"

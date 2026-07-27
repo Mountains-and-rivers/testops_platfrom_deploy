@@ -8,7 +8,7 @@
 
 | 主机名 | IP | 角色 | CPU | 内存 | 磁盘 | 操作系统 | 内核版本 |
 |--------|-----|------|-----|------|------|---------|---------|
-| master | 192.168.0.105 | control-plane | 6 Cores | 3.5 Gi | 37G | CentOS Stream 9 | 5.14.0-725.el9.x86_64 |
+| master | 192.168.0.103 | control-plane | 6 Cores | 3.5 Gi | 37G | CentOS Stream 9 | 5.14.0-725.el9.x86_64 |
 | node01 | 192.168.0.102 | worker | 4 Cores | 7.2 Gi | 70G | CentOS Stream 9 | 5.14.0-725.el9.x86_64 |
 | node02 | 192.168.0.106 | worker | 6 Cores | 5.2 Gi | 37G | CentOS Stream 9 | 5.14.0-725.el9.x86_64 |
 
@@ -538,3 +538,7 @@ ssh root@<master_ip>
 kubectl get nodes
 kubectl get pods -A
 ```
+
+集群部署完成后，所有系统 Pod 应全部处于 Running 状态：
+
+![K8s 集群验证](docs/images/k8s_test_result.png)

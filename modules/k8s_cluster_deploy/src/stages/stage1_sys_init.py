@@ -75,14 +75,14 @@ def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
         mode = selinux_cfg.get("mode", "disabled")
         ssh.exec_command(f"setenforce 0 2>/dev/null; "
                          f"sed -i 's/^SELINUX=.*/SELINUX={mode}/' /etc/selinux/config",
-                         sudo=True)
+                         sudo=False)
         logger.info(f"[{hostname}] SELinux → {mode}")
 
         # 2. 关闭 Swap（只注释未注释的 swap 行，可重复执行）
         if init_cfg.get("swap", {}).get("disable_permanently", True):
-            ssh.exec_command("swapoff -a", sudo=True)
+            ssh.exec_command("swapoff -a", sudo=False)
             # 只匹配不以 # 开头的 swap 行，避免重复注释
-            ssh.exec_command("sed -i '/^[^#].*swap/s/^/#/' /etc/fstab", sudo=True)
+            ssh.exec_command("sed -i '/^[^#].*swap/s/^/#/' /etc/fstab", sudo=False)
             logger.info(f"[{hostname}] Swap 已关闭")
 
         # 3. 关闭防火墙
@@ -90,14 +90,14 @@ def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
         manager = fw_cfg.get("manager", "firewalld")
         ssh.exec_command(f"systemctl stop {manager} 2>/dev/null; "
                          f"systemctl disable {manager} 2>/dev/null",
-                         sudo=True)
+                         sudo=False)
         logger.info(f"[{hostname}] 防火墙 ({manager}) 已停止")
 
         # 4. 加载内核模块
         modules = init_cfg.get("kernel_modules", {}).get("required", [])
         for mod in modules:
-            ssh.exec_command(f"modprobe {mod}", sudo=True)
-            ssh.exec_command(f"echo '{mod}' > /etc/modules-load.d/{mod}.conf", sudo=True)
+            ssh.exec_command(f"modprobe {mod}", sudo=False)
+            ssh.exec_command(f"echo '{mod}' > /etc/modules-load.d/{mod}.conf", sudo=False)
         logger.info(f"[{hostname}] 内核模块已加载: {modules}")
 
         # 5. 配置内核参数
@@ -106,9 +106,9 @@ def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
         sysctl_content = "\n".join(sysctl_lines)
         ssh.exec_command(
             f"cat > /etc/sysctl.d/99-kubernetes.conf << 'EOF'\n{sysctl_content}\nEOF",
-            sudo=True
+            sudo=False
         )
-        ssh.exec_command("sysctl --system", sudo=True)
+        ssh.exec_command("sysctl --system", sudo=False)
         logger.info(f"[{hostname}] 内核参数已配置")
 
         # 6. 配置资源限制
@@ -128,7 +128,7 @@ def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
         limits_content = "\n".join(limits_lines)
         ssh.exec_command(
             f"cat > /etc/security/limits.d/99-kubernetes.conf << 'EOF'\n{limits_content}\nEOF",
-            sudo=True
+            sudo=False
         )
         logger.info(f"[{hostname}] 资源限制已配置")
 
@@ -145,22 +145,22 @@ def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
                     f"echo '# BEGIN_K8S_NTP' >> /etc/chrony.conf; "
                     f"echo '{server_lines}' >> /etc/chrony.conf; "
                     f"echo '# END_K8S_NTP' >> /etc/chrony.conf",
-                    sudo=True
+                    sudo=False
                 )
             ssh.exec_command(f"systemctl enable {ntp_service} --now 2>/dev/null; "
                            f"systemctl restart {ntp_service} 2>/dev/null",
-                           sudo=True)
+                           sudo=False)
             logger.info(f"[{hostname}] 时间同步 ({ntp_service}) 已配置，服务器: {ntp_servers}")
 
         # 8. 配置 /etc/hosts（标记块，防重复）
         if hosts_block:
             ssh.exec_command(
                 "sed -i '/^# BEGIN_K8S_HOSTS$/,/^# END_K8S_HOSTS$/d' /etc/hosts",
-                sudo=True
+                sudo=False
             )
             ssh.exec_command(
                 f"echo '{hosts_block}' >> /etc/hosts",
-                sudo=True
+                sudo=False
             )
 
         logger.info(f"[{hostname}] 系统初始化完成 ✓")
@@ -252,16 +252,16 @@ def rollback_sys_init(state: WorkflowStateManager) -> None:
             # 1. 恢复 SELinux
             ssh.exec_command(
                 "sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config",
-                sudo=True
+                sudo=False
             )
             logger.info(f"[{hostname}] SELinux → enforcing")
 
             # 2. 恢复 swap
             ssh.exec_command(
                 "sed -i '/^#.*swap/s/^#//' /etc/fstab",
-                sudo=True
+                sudo=False
             )
-            ssh.exec_command("swapon -a 2>/dev/null || true", sudo=True)
+            ssh.exec_command("swapon -a 2>/dev/null || true", sudo=False)
             logger.info(f"[{hostname}] Swap 已恢复")
 
             # 3. 恢复防火墙
@@ -269,35 +269,35 @@ def rollback_sys_init(state: WorkflowStateManager) -> None:
             manager = fw_cfg.get("manager", "firewalld")
             ssh.exec_command(
                 f"systemctl enable {manager} --now 2>/dev/null || true",
-                sudo=True
+                sudo=False
             )
             logger.info(f"[{hostname}] 防火墙 ({manager}) 已恢复")
 
             # 4. 删除内核模块加载配置
             modules = sys_init.get("system_init", {}).get("kernel_modules", {}).get("required", [])
             for mod in modules:
-                ssh.exec_command(f"rm -f /etc/modules-load.d/{mod}.conf", sudo=True)
+                ssh.exec_command(f"rm -f /etc/modules-load.d/{mod}.conf", sudo=False)
             logger.info(f"[{hostname}] 内核模块配置已移除")
 
             # 5. 删除 sysctl 配置
-            ssh.exec_command("rm -f /etc/sysctl.d/99-kubernetes.conf", sudo=True)
-            ssh.exec_command("sysctl --system 2>/dev/null || true", sudo=True)
+            ssh.exec_command("rm -f /etc/sysctl.d/99-kubernetes.conf", sudo=False)
+            ssh.exec_command("sysctl --system 2>/dev/null || true", sudo=False)
 
             # 6. 删除 limits 配置
-            ssh.exec_command("rm -f /etc/security/limits.d/99-kubernetes.conf", sudo=True)
+            ssh.exec_command("rm -f /etc/security/limits.d/99-kubernetes.conf", sudo=False)
 
             # 7. 清理 /etc/hosts 中的 K8S 标记块
             ssh.exec_command(
                 "sed -i '/^# BEGIN_K8S_HOSTS$/,/^# END_K8S_HOSTS$/d' /etc/hosts",
-                sudo=True
+                sudo=False
             )
 
             # 8. 清理 chrony 中的 NTP 标记块，停止 chronyd
             ssh.exec_command(
                 "sed -i '/^# BEGIN_K8S_NTP$/,/^# END_K8S_NTP$/d' /etc/chrony.conf",
-                sudo=True
+                sudo=False
             )
-            ssh.exec_command("systemctl disable chronyd --now 2>/dev/null || true", sudo=True)
+            ssh.exec_command("systemctl disable chronyd --now 2>/dev/null || true", sudo=False)
 
             logger.info(f"[{hostname}] 系统初始化回滚完成 ✓")
 

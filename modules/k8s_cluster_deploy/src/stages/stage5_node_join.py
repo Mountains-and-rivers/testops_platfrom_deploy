@@ -236,7 +236,7 @@ def rollback_node_join(state: WorkflowStateManager) -> None:
             worker_ssh.connect()
             worker_ssh.exec_command(
                 "kubeadm reset --force --cri-socket=unix:///var/run/containerd/containerd.sock 2>/dev/null || true",
-                sudo=True, timeout=120
+                sudo=False, timeout=120
             )
             logger.info(f"[{hostname}] kubeadm reset 完成 ✓")
 

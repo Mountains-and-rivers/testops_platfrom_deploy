@@ -78,7 +78,7 @@ def _install_kube_on_node(node: dict, k8s_version: str) -> None:
         repo_content = K8S_REPO_TEMPLATE.format(minor_version=minor_ver)
         ssh.exec_command(
             f"cat > /etc/yum.repos.d/kubernetes.repo << 'K8S_EOF'\n{repo_content}\nK8S_EOF",
-            sudo=True
+            sudo=False
         )
         logger.debug(f"[{hostname}] K8s repo 已配置: v{minor_ver}")
 
@@ -86,7 +86,7 @@ def _install_kube_on_node(node: dict, k8s_version: str) -> None:
         exit_code, stdout, stderr = ssh.exec_command(
             f"yum install -y "
             f"kubeadm-{k8s_version} kubectl-{k8s_version} kubelet-{k8s_version}",
-            sudo=True, timeout=300
+            sudo=False, timeout=300
         )
         if exit_code != 0:
             raise KubeComponentInstallError(
@@ -97,7 +97,7 @@ def _install_kube_on_node(node: dict, k8s_version: str) -> None:
         # 获取实际安装的版本
         _, version_out, _ = ssh.exec_command(
             "kubeadm version -o short 2>/dev/null || echo unknown",
-            sudo=True
+            sudo=False
         )
         logger.info(f"[{hostname}] K8s 组件已安装: {version_out.strip()}")
 
@@ -108,12 +108,12 @@ def _install_kube_on_node(node: dict, k8s_version: str) -> None:
         )
         ssh.exec_command(
             f"echo '{kubelet_config}' > /etc/sysconfig/kubelet",
-            sudo=True
+            sudo=False
         )
         logger.debug(f"[{hostname}] kubelet 配置已写入")
 
         # 4. 启用 kubelet（不启动，等待 kubeadm init 接管）
-        ssh.exec_command_ok("systemctl enable kubelet 2>/dev/null || true", sudo=True)
+        ssh.exec_command_ok("systemctl enable kubelet 2>/dev/null || true", sudo=False)
 
         # 5. 安装后扫描验证
         _verify_kube(ssh, hostname, k8s_version)
@@ -296,17 +296,17 @@ def rollback_kube_components(state: WorkflowStateManager) -> None:
             logger.info(f"[{hostname}] 开始卸载 K8s 组件...")
 
             # 停止 + 禁用
-            ssh.exec_command("systemctl stop kubelet 2>/dev/null || true", sudo=True)
-            ssh.exec_command("systemctl disable kubelet 2>/dev/null || true", sudo=True)
+            ssh.exec_command("systemctl stop kubelet 2>/dev/null || true", sudo=False)
+            ssh.exec_command("systemctl disable kubelet 2>/dev/null || true", sudo=False)
             # 卸载包
             ssh.exec_command(
                 "yum remove -y kubeadm kubectl kubelet 2>/dev/null || true",
-                sudo=True, timeout=120
+                sudo=False, timeout=120
             )
             # 删除仓库、配置、数据
-            ssh.exec_command("rm -f /etc/yum.repos.d/kubernetes.repo", sudo=True)
-            ssh.exec_command("rm -f /etc/sysconfig/kubelet", sudo=True)
-            ssh.exec_command("rm -rf /var/lib/kubelet /etc/kubernetes", sudo=True)
+            ssh.exec_command("rm -f /etc/yum.repos.d/kubernetes.repo", sudo=False)
+            ssh.exec_command("rm -f /etc/sysconfig/kubelet", sudo=False)
+            ssh.exec_command("rm -rf /var/lib/kubelet /etc/kubernetes", sudo=False)
 
             logger.info(f"[{hostname}] K8s 组件卸载完成 ✓")
 

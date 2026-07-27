@@ -1,0 +1,14 @@
+.git
+.gitignore
+.github
+*.md
+doc/
+test/
+tests/
+*.sample
+docker/
+.idea/
+.vscode/
+node_modules/
+.DS_Store
+source/.git

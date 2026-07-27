@@ -5,12 +5,12 @@ __pycache__/
 *.so
 *.egg-info/
 dist/
-build/
+/build/
 .eggs/
 *.egg
 .venv/
 venv/
-env/
+/env/
 
 # IDE & Editor
 .vscode/
@@ -31,6 +31,11 @@ reports/**/*.pdf
 reports/**/*.html
 reports/**/*.json
 reports/**/*.tar.gz
+
+# K8s + Calico 离线镜像 tar 包
+modules/k8s_cluster_deploy/images/*.tar
+modules/k8s_cluster_deploy/images/calico/
+scripts/*.tar
 
 # Sensitive config
 *.key
