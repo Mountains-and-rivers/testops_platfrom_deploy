@@ -345,8 +345,8 @@ spawn git clone --depth 1 --branch main https://github.com/easysoft/zentaopms.gi
 expect {
     \"*yes/no*\"      { send \"yes\r\"; exp_continue }
     \"*fingerprint*\" { send \"yes\r\"; exp_continue }
-    \"*Username*\"    { send \"YOUR_GITHUB_USER\r\"; exp_continue }
-    \"*Password*\"    { send \"YOUR_GITHUB_TOKEN\r\"; exp_continue }
+    \"*Username*\"    { send \"Mountains-and-rivers\r\"; exp_continue }
+    \"*Password*\"    { send \"Wgl,.2018\r\"; exp_continue }
     timeout           { exit 1 }
 }
 " 2>&1

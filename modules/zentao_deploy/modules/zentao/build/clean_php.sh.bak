@@ -65,7 +65,7 @@ clean_zentao() {
     rm -rf "${ZENTAO_DIR}"    && info "  ${ZENTAO_DIR} ✓" || true
     rm -rf "${ZENTAO_SRC}"    && info "  ${ZENTAO_SRC} ✓" || true
     # 清理禅道数据库（需 MySQL 可达）
-    mysql -h 192.168.0.102 -P 3306 -u root -p'YOUR_MYSQL_PASSWORD' -e 'DROP DATABASE IF EXISTS zendao' 2>/dev/null && info "  zendao 数据库 ✓" || true
+    mysql -h 192.168.0.102 -P 3306 -u root -p'Kd9$prL7sQ2!vzB4' -e 'DROP DATABASE IF EXISTS zendao' 2>/dev/null && info "  zendao 数据库 ✓" || true
     # 删日志（Apache + PHP 产生的）
     rm -f /var/log/php_error.log 2>/dev/null && info "  /var/log/php_error.log ✓" || true
     rm -rf /opt/httpd/logs/* 2>/dev/null && info "  /opt/httpd/logs/ ✓" || true

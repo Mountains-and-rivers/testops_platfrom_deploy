@@ -157,7 +157,7 @@ if [ ! -f "${ZENTAO_SRC}/www/index.php" ]; then
     else
         info "  Git clone..."
         cd /tmp  # 确保 CWD 有效
-        expect -c "log_user 1; set timeout 300; spawn git clone --depth 1 --branch main https://github.com/easysoft/zentaopms.git ${ZENTAO_SRC}; expect { \"*yes/no*\" { send \"yes\r\"; exp_continue } \"*fingerprint*\" { send \"yes\r\"; exp_continue } \"*Username*\" { send \"YOUR_GITHUB_USER\r\"; exp_continue } \"*Password*\" { send \"YOUR_GITHUB_TOKEN\r\"; exp_continue } timeout { exit 1 } }" 2>&1
+        expect -c "log_user 1; set timeout 300; spawn git clone --depth 1 --branch main https://github.com/easysoft/zentaopms.git ${ZENTAO_SRC}; expect { \"*yes/no*\" { send \"yes\r\"; exp_continue } \"*fingerprint*\" { send \"yes\r\"; exp_continue } \"*Username*\" { send \"Mountains-and-rivers\r\"; exp_continue } \"*Password*\" { send \"Wgl,.2018\r\"; exp_continue } timeout { exit 1 } }" 2>&1
     fi
     [ -f "${ZENTAO_SRC}/www/index.php" ] || err "源码获取失败"
 fi
@@ -179,7 +179,7 @@ $config->db->port        = '3306';
 $config->db->name        = 'zendao';
 $config->db->user        = 'root';
 # ⚠️ 密码含 $：my.php 用单引号字符串，PHP 不会解析 $pr 为变量。← 与 MySQL 密码一致
-$config->db->password    = 'YOUR_MYSQL_PASSWORD';
+$config->db->password    = 'Kd9$prL7sQ2!vzB4';
 $config->db->prefix      = 'zt_';
 $config->db->driver      = 'mysql';
 $config->default->lang   = 'zh-cn';
@@ -188,18 +188,18 @@ chmod 644 "${ZENTAO_DIR}/config/my.php"
 # 创建禅道运行时必需的 www/data 目录
 mkdir -p "${ZENTAO_DIR}/www/data" && chmod 777 "${ZENTAO_DIR}/www/data"
 # 确保数据库存在，导入完整 schema（zentao.sql 为当前版本的完整建表语句）
-mysql -h 192.168.0.102 -P 3306 -u root -p'YOUR_MYSQL_PASSWORD' -e 'CREATE DATABASE IF NOT EXISTS zendao DEFAULT CHARSET utf8mb4' 2>/dev/null || true
+mysql -h 192.168.0.102 -P 3306 -u root -p'Kd9$prL7sQ2!vzB4' -e 'CREATE DATABASE IF NOT EXISTS zendao DEFAULT CHARSET utf8mb4' 2>/dev/null || true
 if [ -f "${ZENTAO_DIR}/db/zentao.sql" ]; then
     # 替换 zentao.sql 中的占位符后导入（__DATABASE__ → 实际库名, __PREFIX__ → zt_）
     sed "s/__DATABASE__/zendao/g; s/__PREFIX__/zt_/g" "${ZENTAO_DIR}/db/zentao.sql" | \
-        mysql -h 192.168.0.102 -P 3306 -u root -p'YOUR_MYSQL_PASSWORD' zendao 2>/dev/null && \
-        info "  数据库表初始化完成 ($(mysql -h 192.168.0.102 -P 3306 -u root -p'YOUR_MYSQL_PASSWORD' zendao -NBe 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=\"zendao\"' 2>/dev/null) 张表)" || \
+        mysql -h 192.168.0.102 -P 3306 -u root -p'Kd9$prL7sQ2!vzB4' zendao 2>/dev/null && \
+        info "  数据库表初始化完成 ($(mysql -h 192.168.0.102 -P 3306 -u root -p'Kd9$prL7sQ2!vzB4' zendao -NBe 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=\"zendao\"' 2>/dev/null) 张表)" || \
         warn "  数据库表初始化失败，请检查 MySQL 连接"
 else
     warn "  zentao.sql 缺失，跳过数据库初始化"
 fi
 # 写入版本号 + 默认公司 + 管理员账号（admin / 123456）
-mysql -h 192.168.0.102 -P 3306 -u root -p'YOUR_MYSQL_PASSWORD' zendao <<'ENDINIT' 2>/dev/null || true
+mysql -h 192.168.0.102 -P 3306 -u root -p'Kd9$prL7sQ2!vzB4' zendao <<'ENDINIT' 2>/dev/null || true
 INSERT IGNORE INTO zt_company (name, phone, admins) VALUES ('默认公司', '', ',admin,');
 INSERT IGNORE INTO zt_config (vision, owner, module, section, `key`, value) VALUES ('rnd', 'system', 'common', 'global', 'version', '22.3');
 INSERT IGNORE INTO zt_group (name, role, `desc`, acl, developer, vision) VALUES ('guest', 'guest', 'Guest', '', 0, 'rnd');

@@ -13,7 +13,7 @@ cd /tmp  # 确保 CWD 有效（防止调用方目录被删导致后续失败）
 MYSQL_VERSION="8.0.35"
 MYSQL_PKG="mysql-${MYSQL_VERSION}-linux-glibc2.28-x86_64.tar.xz"
 MYSQL_DOWNLOAD="https://downloads.mysql.com/archives/get/p/23/file/${MYSQL_PKG}"
-MYSQL_ROOT_PASSWORD='YOUR_MYSQL_PASSWORD'
+MYSQL_ROOT_PASSWORD='Kd9$prL7sQ2!vzB4'
 MYSQL_DATABASE="zendao"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/mysql}"
@@ -190,8 +190,8 @@ fi
 step "[9/9] 安全配置..."
 # <<'SQL' 加引号禁止 bash 展开 $ 符号，密码原样传给 MySQL
 mysql -u root --socket=/tmp/mysql.sock << 'SQL'
-ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'YOUR_MYSQL_PASSWORD';
-CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH mysql_native_password BY 'YOUR_MYSQL_PASSWORD';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'Kd9$prL7sQ2!vzB4';
+CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED WITH mysql_native_password BY 'Kd9$prL7sQ2!vzB4';
 GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;
 CREATE DATABASE IF NOT EXISTS `zendao` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 FLUSH PRIVILEGES;
