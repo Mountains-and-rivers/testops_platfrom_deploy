@@ -247,13 +247,22 @@ innodb_file_per_table = ON
 
 ## 第三步：编译服务器环境准备
 
-### 3.1 执行编译环境初始化
+### 3.1 上传编译脚本到 CentOS 9 编译服务器
+
+将以下 4 个文件复制到编译服务器：
 
 ```bash
-# 将 build_support.sh 上传到编译服务器
-scp modules/zentao/build/build_support.sh root@192.168.0.100:/opt/
+# 在工作站执行
+scp modules/zentao_deploy/modules/zentao/build/build.sh              root@192.168.0.100:/opt/
+scp modules/zentao_deploy/modules/zentao/build/build_support.sh      root@192.168.0.100:/opt/
+scp modules/zentao_deploy/modules/zentao/build/Dockerfile            root@192.168.0.100:/opt/build/zentaopms/
+scp modules/zentao_deploy/modules/zentao/build/.dockerignore         root@192.168.0.100:/opt/build/zentaopms/
+scp modules/zentao_deploy/modules/zentao/build/docker-entrypoint.sh  root@192.168.0.100:/opt/build/zentaopms/
+```
 
-# SSH 登录编译服务器，执行初始化
+### 3.2 执行编译环境初始化
+
+```bash
 ssh root@192.168.0.100
 bash /opt/build_support.sh
 ```
@@ -262,6 +271,16 @@ bash /opt/build_support.sh
 - 安装 23 个编译依赖包（gcc/make/autoconf/libxml2-devel/libpng-devel 等）
 - 验证 gcc/make/wget/git/docker 可用性
 - 启动 Docker 服务
+
+### 3.3 一键编译（在 CentOS 9 服务器上执行）
+
+```bash
+# 仅编译镜像
+bash /opt/build.sh 21.2
+
+# 编译 + 推送到 Harbor
+HARBOR_PASS="YourHarborPassword123!" bash /opt/build.sh 21.2 push
+```
 
 ### 3.2 编译期依赖组件表
 

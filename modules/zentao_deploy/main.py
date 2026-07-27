@@ -27,7 +27,8 @@ def cli():
 @click.option("--version", "-v", default="21.2", help="禅道版本号")
 @click.option("--push/--no-push", default=False, help="构建后推送 Harbor")
 @click.option("--skip-pull", is_flag=True, help="跳过源码拉取")
-def build(version, push, skip_pull):
+@click.option("--local", is_flag=True, help="强制本地构建（不使用远程编译服务器）")
+def build(version, push, skip_pull, local):
     """从 CentOS Stream 9 源码构建禅道 Docker 镜像"""
     from modules.zentao.build.build_image import clone_source, build_image
     from common.yaml_render import YAMLHelper
@@ -35,8 +36,8 @@ def build(version, push, skip_pull):
     registry = config.get("harbor", {}).get("url", "").replace("https://", "").replace("http://", "")
     project = config.get("harbor", {}).get("project", "testops")
     if not skip_pull:
-        clone_source(version)
-    build_image(version, registry, project, push=push)
+        clone_source(version, ssh=None if local else None)
+    build_image(version, registry, project, push=push, local=local)
 
 
 # ============================================================

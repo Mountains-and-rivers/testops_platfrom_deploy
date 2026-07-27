@@ -39,8 +39,8 @@ build_server:
 # 禅道版本
 zentao:
   version: "21.2"
-  source_url: "https://github.com/easysoft/zentaopms"
-  source_mirror: "https://gitee.com/easysoft/zentaopms"
+  source_url: "https://github.com/easysoft/zentaopms.git"
+  source_mirror: "https://gitee.com/easysoft/zentaopms.git"
   php_version: "8.1.27"
   httpd_version: "2.4.62"
   container_port: 8080
