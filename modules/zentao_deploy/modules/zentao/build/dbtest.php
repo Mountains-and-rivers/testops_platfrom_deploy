@@ -1,0 +1,1 @@
+<?php include '../config/my.php'; try{$p=new PDO('mysql:host='.$config->db->host.';port='.$config->db->port.';dbname='.$config->db->name.';charset=utf8mb4',$config->db->user,$config->db->password);echo 'DB OK: '.$p->getAttribute(PDO::ATTR_SERVER_VERSION);}catch(Exception $e){echo 'FAIL: '.$e->getMessage();}

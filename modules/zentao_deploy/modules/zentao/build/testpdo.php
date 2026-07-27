@@ -1,0 +1,1 @@
+<?php try{$p=new PDO("mysql:host=192.168.0.102;port=3306;dbname=zendao;charset=utf8mb4","root","Kd9!vzB4");echo"PDO OK: ".$p->getAttribute(PDO::ATTR_SERVER_VERSION);}catch(Exception $e){echo"FAIL: ".$e->getMessage();}

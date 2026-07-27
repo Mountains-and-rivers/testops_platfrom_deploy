@@ -47,3 +47,8 @@ credentials/
 # OS
 Thumbs.db
 Desktop.ini
+
+# 编译依赖压缩包（体积大，不上传）
+modules/zentao_deploy/modules/mysql8.0/*.xz
+modules/zentao_deploy/modules/zentao/build/*.tar.gz
+modules/zentao_deploy/modules/zentao/build/*.zip

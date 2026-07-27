@@ -8,6 +8,9 @@
 # ============================================================
 set -euo pipefail
 
+# 脚本所在目录的绝对路径（在 cd 前保存，确保本地包查找始终正确）
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$(pwd)")"
+
 # ---- 配置参数（根据环境修改）----
 ZENTAO_VERSION="${1:-21.2}"              # 禅道版本号
 PUSH="${2:-}"                             # 填 "push" 则推送
@@ -17,9 +20,9 @@ HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-}"
 IMAGE_NAME="${IMAGE_NAME:-zentao}"
 BUILD_DIR="${BUILD_DIR:-/opt/build/zentaopms}"
+GIT_BRANCH="main"
 GITHUB_SSH="git@github.com:easysoft/zentaopms.git"
 GITHUB_HTTPS="https://github.com/easysoft/zentaopms.git"
-GITEE_HTTPS="https://gitee.com/easysoft/zentaopms.git"
 
 FULL_IMAGE="${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:${ZENTAO_VERSION}"
 LATEST_IMAGE="${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:latest"
@@ -28,9 +31,32 @@ LATEST_IMAGE="${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE_NAME}:latest"
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-err()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
+step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
+err()   { echo -e "\n${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${RED}  ✗ 错误: ${BASH_SOURCE[0]} 第 ${BASH_LINENO[0]} 行${NC}"; echo -e "${RED}  $*${NC}"; echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; exit 1; }
 check_ok()  { echo -e "  ${GREEN}[OK]${NC} $*"; }
+trap 'err "脚本异常退出 (exit code=$?)"' ERR
 check_fail(){ echo -e "  ${RED}[FAIL]${NC} $*"; }
+
+# 下载函数：脚本目录 → /tmp/build-cache → ./ 逐级查找（优先本地，兜底下载）
+CACHE_DIR_DL="${CACHE_DIR_DL:-/tmp/build-cache}"
+mkdir -p "${CACHE_DIR_DL}"
+download_tar() {
+    local url="$1" fname="$2"
+    # 按优先级查找本地文件：脚本同目录 → 缓存目录 → 当前目录
+    for d in "${_SCRIPT_DIR}/" "${CACHE_DIR_DL}/" "./"; do
+        if [ -f "${d}${fname}" ] && [ -s "${d}${fname}" ]; then
+            if tar -tzf "${d}${fname}" >/dev/null 2>&1; then
+                [ "${d}${fname}" != "./${fname}" ] && cp "${d}${fname}" "./${fname}"
+                info "  使用本地文件: ${d}${fname}"; return 0
+            fi
+            warn "  本地文件损坏，删除: ${d}${fname}"; rm -f "${d}${fname}"
+        fi
+    done
+    info "  下载: ${url}"
+    wget --show-progress -O "${fname}" "${url}" || err "下载失败: ${url}"
+    tar -tzf "${fname}" >/dev/null 2>&1 || { rm -f "${fname}"; err "下载文件损坏: ${fname}"; }
+    cp "${fname}" "${CACHE_DIR_DL}/" 2>/dev/null || true
+}
 
 # ---- 预检函数 ----
 pre_check() {
@@ -99,13 +125,16 @@ pre_check() {
         check_fail "git: 未安装（dnf install -y git）"
     fi
 
-    # 7. wget
+    # 7. wget + cmake
     total=$((total+1))
     if command -v wget &>/dev/null; then
         check_ok "wget: $(wget --version 2>&1 | head -1)"
         passed=$((passed+1))
     else
         check_fail "wget: 未安装（dnf install -y wget）"
+    fi
+    if ! command -v cmake &>/dev/null; then
+        dnf install -y cmake 2>/dev/null || true
     fi
 
     # 8. Docker
@@ -114,7 +143,13 @@ pre_check() {
         check_ok "docker: $(docker --version)"
         passed=$((passed+1))
     else
-        check_fail "docker: 未安装（dnf install -y docker）"
+        warn "docker 未安装，正在安装..."
+        dnf install -y docker-ce docker-ce-cli containerd.io 2>/dev/null \
+            || dnf install -y docker 2>/dev/null \
+            || check_fail "Docker 安装失败"
+        systemctl enable docker --now 2>/dev/null || true
+        check_ok "docker 已安装"
+        passed=$((passed+1))
     fi
 
     # 9. Docker 运行状态
@@ -124,18 +159,99 @@ pre_check() {
         check_ok "Docker 运行中"
         passed=$((passed+1))
     else
-        check_fail "Docker 未运行或无响应（systemctl start docker）"
+        systemctl start docker 2>/dev/null || true
+        sleep 2
+        if timeout 10 docker info &>/dev/null 2>&1; then
+            check_ok "Docker 已启动"
+            passed=$((passed+1))
+        else
+            check_fail "Docker 无法启动"
+        fi
     fi
 
-    # 10. GitHub 连通性
+    # 10. expect 工具
+    total=$((total+1))
+    if command -v expect &>/dev/null; then
+        check_ok "expect: $(expect -v 2>&1 | head -1)"
+        passed=$((passed+1))
+    else
+        warn "expect 未安装，正在安装..."
+        dnf install -y expect 2>/dev/null && check_ok "expect 已安装" && passed=$((passed+1)) \
+            || check_fail "expect 安装失败"
+    fi
+
+    # 11. CentOS Stream 9 基础镜像
+    total=$((total+1))
+    info "  检查 Docker 基础镜像..."
+    if docker images centos:stream9 --format '{{.Tag}}' 2>/dev/null | grep -q .; then
+        check_ok "基础镜像 centos:stream9 已存在"
+        passed=$((passed+1))
+    else
+        warn "拉取 CentOS Stream 9 基础镜像..."
+        docker pull quay.io/centos/centos:stream9 2>/dev/null && \
+            docker tag quay.io/centos/centos:stream9 centos:stream9 && \
+            check_ok "基础镜像已拉取 (quay.io)" && passed=$((passed+1)) \
+            || check_fail "基础镜像拉取失败"
+    fi
+
+    # 12. Git 凭证
+    total=$((total+1))
+    if git config --global credential.helper 2>/dev/null | grep -q . || \
+       [ -f ~/.git-credentials ]; then
+        check_ok "Git 凭证已配置"
+        passed=$((passed+1))
+    else
+        git config --global credential.helper store 2>/dev/null || true
+        check_ok "Git 凭证已配置 (store)"
+        passed=$((passed+1))
+    fi
+
+    # 13. 编译依赖库检测 + 自动源码编译安装
+    total=$((total+1))
+    export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:${PKG_CONFIG_PATH:-}
+    gcc_ok=false
+    echo "int main(){return 0;}" | gcc -x c - -o /tmp/gcc_test 2>/dev/null && rm -f /tmp/gcc_test && gcc_ok=true
+    if ! $gcc_ok; then
+        warn "gcc 无法编译，正在修复 glibc..."
+        dnf distro-sync --allowerasing -y glibc glibc-devel glibc-headers glibc-common libgcc libstdc++ 2>/dev/null || true
+        dnf reinstall -y gcc glibc-devel 2>/dev/null || true
+    fi
+    if pkg-config --exists libzip 2>/dev/null; then
+        info "  libzip 已安装: $(pkg-config --modversion libzip)"
+    else
+        warn "  编译安装 libzip（从源码）..."
+        cd /tmp && rm -rf libzip-1.10.1*
+        download_tar https://libzip.org/download/libzip-1.10.1.tar.gz libzip-1.10.1.tar.gz
+        tar xf libzip-1.10.1.tar.gz && cd libzip-1.10.1
+        mkdir build && cd build && cmake .. && make -j$(nproc) && make install
+        rm -rf /tmp/libzip-1.10.1* && ldconfig
+        info "  libzip 编译完成"
+    fi
+    if pkg-config --exists oniguruma 2>/dev/null; then
+        info "  oniguruma 已安装: $(pkg-config --modversion oniguruma)"
+    else
+        warn "  编译安装 oniguruma（从源码）..."
+        cd /tmp && rm -rf onig-6.9.9*
+        download_tar https://github.com/kkos/oniguruma/releases/download/v6.9.9/onig-6.9.9.tar.gz onig-6.9.9.tar.gz
+        tar xf onig-6.9.9.tar.gz && cd onig-6.9.9
+        ./configure && make -j$(nproc) && make install
+        rm -rf /tmp/onig-6.9.9* && ldconfig
+        info "  oniguruma 编译完成"
+    fi
+    if [ ! -f "/usr/lib64/libjpeg.so" ] && [ -f "/usr/lib64/libjpeg.so.62" ]; then
+        ln -sf /usr/lib64/libjpeg.so.62 /usr/lib64/libjpeg.so 2>/dev/null || true
+    fi
+    check_ok "编译库就绪"
+    passed=$((passed+1))
+
+    # 14. GitHub 连通性
     total=$((total+1))
     info "  检查 GitHub 可达性..."
     if timeout 10 curl -sI --connect-timeout 5 https://github.com 2>/dev/null | head -1 | grep -qE "200|301|302"; then
         check_ok "GitHub 可达"
         passed=$((passed+1))
     else
-        warn "GitHub 不可达（将自动使用 Gitee 镜像）"
-        passed=$((passed+1))
+        warn "GitHub 不可达"
     fi
 
     echo ""
@@ -170,74 +286,124 @@ rm -rf "${BUILD_DIR}/source"
 mkdir -p "${BUILD_DIR}/source"
 # expect 自动应答：处理 git clone 的 yes/no / username / password 交互
 git_expect_clone() {
-    local repo_url="$1"
-    local dest_dir="$2"
-    local branch="$3"
-    expect <<EOF 2>/dev/null
-set timeout 60
-log_user 0
+    local repo_url="$1" dest_dir="$2" branch="$3"
+    expect -c "
+set timeout 120
 spawn git clone --depth 1 --branch ${branch} ${repo_url} ${dest_dir}
 expect {
-    "yes/no"           { send "yes\r"; exp_continue }
-    "Username for *"   { send "\r";   exp_continue }
-    "Password for *"   { send "\r";   exp_continue }
-    "Enter passphrase" { send "\r";   exp_continue }
-    timeout            { exit 1 }
+    \"*yes/no*\"      { send \"yes\r\"; exp_continue }
+    \"*fingerprint*\" { send \"yes\r\"; exp_continue }
+    \"*Username*\"    { send \"\r\";   exp_continue }
+    \"*Password*\"    { send \"\r\";   exp_continue }
+    \"*passphrase*\"  { send \"\r\";   exp_continue }
+    timeout           { exit 1 }
     eof
 }
 catch wait result
 exit [lindex \$result 3]
-EOF
+"
 }
 
-# 优先 GitHub SSH → GitHub HTTPS → Gitee HTTPS → 官网 ZIP
-info "  尝试 GitHub SSH（密钥认证）..."
-if git_expect_clone "${GITHUB_SSH}" "${BUILD_DIR}/source" "${ZENTAO_VERSION}"; then
-    info "  源码拉取成功 (GitHub SSH)"
-elif git_expect_clone "${GITHUB_HTTPS}" "${BUILD_DIR}/source" "${ZENTAO_VERSION}"; then
-    info "  源码拉取成功 (GitHub HTTPS)"
-elif git_expect_clone "${GITEE_HTTPS}" "${BUILD_DIR}/source" "${ZENTAO_VERSION}"; then
-    info "  源码拉取成功 (Gitee)"
-else
-    warn "  Git 方式均失败，尝试官网下载 ZIP..."
-    zip_url="https://www.zentao.net/dl/zentaopms/${ZENTAO_VERSION}/ZenTaoPMS.${ZENTAO_VERSION}.zip"
-    wget -q -O /tmp/zentao.zip "${zip_url}" 2>/dev/null \
-        || curl -sL -o /tmp/zentao.zip "${zip_url}" 2>/dev/null \
-        || err "源码拉取失败，请检查网络或手动下载"
-    mkdir -p "${BUILD_DIR}/source"
-    unzip -qo /tmp/zentao.zip -d /tmp/zentao_extract
-    mv /tmp/zentao_extract/*/* "${BUILD_DIR}/source/" 2>/dev/null \
-        || mv /tmp/zentao_extract/* "${BUILD_DIR}/source/" 2>/dev/null \
-        || err "ZIP 解压结构异常"
-    rm -rf /tmp/zentao.zip /tmp/zentao_extract
-    info "  源码拉取成功 (官网 ZIP)"
-fi
-rm -rf "${BUILD_DIR}/source/.git" "${BUILD_DIR}/source/.github" 2>/dev/null || true
-
-# ---- 3. 准备构建文件 ----
-info "[3/9] 准备构建文件..."
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-for f in Dockerfile .dockerignore docker-entrypoint.sh; do
-    if [ ! -f "${SCRIPT_DIR}/${f}" ]; then
-        err "缺少构建文件: ${SCRIPT_DIR}/${f}
-请将以下文件复制到 ${SCRIPT_DIR}/ 目录:
-  modules/zentao_deploy/modules/zentao/build/Dockerfile
-  modules/zentao_deploy/modules/zentao/build/.dockerignore
-  modules/zentao_deploy/modules/zentao/build/docker-entrypoint.sh"
+# GitHub 拉取（expect 自动回填 + 最多重试 3 次）
+info "  获取禅道源码..."
+rm -rf "${BUILD_DIR}/source" 2>/dev/null || true
+SCRIPT_DIR="${_SCRIPT_DIR}"
+if [ -f "${SCRIPT_DIR}/zentaopms.zip" ]; then
+    info "  使用本地 zip: ${SCRIPT_DIR}/zentaopms.zip"
+    unzip -qo "${SCRIPT_DIR}/zentaopms.zip" -d /tmp/zentaopms_extract
+    EXTRACTED=$(ls /tmp/zentaopms_extract/ | head -1)
+    if [ -d "/tmp/zentaopms_extract/${EXTRACTED}" ] && [ "$(ls -A /tmp/zentaopms_extract/ | wc -l)" -eq 1 ]; then
+        mv "/tmp/zentaopms_extract/${EXTRACTED}" "${BUILD_DIR}/source"
+    else
+        mv /tmp/zentaopms_extract/* "${BUILD_DIR}/source" 2>/dev/null || mv /tmp/zentaopms_extract "${BUILD_DIR}/source" 2>/dev/null
     fi
-    cp "${SCRIPT_DIR}/${f}" "${BUILD_DIR}/"
+    [ -f "${BUILD_DIR}/source/www/index.php" ] || err "ZIP 解压异常"
+    rm -rf /tmp/zentaopms_extract
+elif [ -f "/tmp/build-cache/zentaopms.zip" ]; then
+    info "  使用本地 zip: /tmp/build-cache/zentaopms.zip"
+    unzip -qo /tmp/build-cache/zentaopms.zip -d /tmp/zentaopms_extract
+    EXTRACTED=$(ls /tmp/zentaopms_extract/ | head -1)
+    if [ -d "/tmp/zentaopms_extract/${EXTRACTED}" ] && [ "$(ls -A /tmp/zentaopms_extract/ | wc -l)" -eq 1 ]; then
+        mv "/tmp/zentaopms_extract/${EXTRACTED}" "${BUILD_DIR}/source"
+    else
+        mv /tmp/zentaopms_extract/* "${BUILD_DIR}/source" 2>/dev/null || mv /tmp/zentaopms_extract "${BUILD_DIR}/source" 2>/dev/null
+    fi
+    [ -f "${BUILD_DIR}/source/www/index.php" ] || err "ZIP 解压异常"
+    rm -rf /tmp/zentaopms_extract
+elif [ -f "${BUILD_DIR}/source/www/index.php" ]; then
+    info "  使用已有源码"
+else
+    mkdir -p "${BUILD_DIR}" && cd "${BUILD_DIR}"  # 确保目录和CWD有效
+    info "  Git clone..."
+    sleep 1
+    for i in 1 2 3; do
+        info "  尝试 ${i}/3..."
+        expect -c "
+log_user 1
+set timeout 300
+spawn git clone --depth 1 --branch main https://github.com/easysoft/zentaopms.git ${BUILD_DIR}/source
+expect {
+    \"*yes/no*\"      { send \"yes\r\"; exp_continue }
+    \"*fingerprint*\" { send \"yes\r\"; exp_continue }
+    \"*Username*\"    { send \"Mountains-and-rivers\r\"; exp_continue }
+    \"*Password*\"    { send \"Wgl,.2018\r\"; exp_continue }
+    timeout           { exit 1 }
+}
+" 2>&1
+        [ -f "${BUILD_DIR}/source/www/index.php" ] && break
+        rm -rf "${BUILD_DIR}/source" 2>/dev/null || true
+        sleep 5
+    done
+fi
+
+rm -rf "${BUILD_DIR}/source/.git" "${BUILD_DIR}/source/.github" 2>/dev/null || true
+info "  源码就绪: ${BUILD_DIR}/source"
+
+# ---- 3. 选择构建模式 ----
+info "[3/9] 准备构建..."
+SCRIPT_DIR="${_SCRIPT_DIR}"
+
+# 复制阿里云 yum 源（加速 Docker 内 dnf 安装）
+if [ -f "${SCRIPT_DIR}/centos.repo" ]; then
+    cp "${SCRIPT_DIR}/centos.repo" "${BUILD_DIR}/centos.repo"
+elif [ -f "/opt/centos.repo" ]; then
+    cp "/opt/centos.repo" "${BUILD_DIR}/centos.repo"
+fi
+info "  yum 源: 阿里云镜像"
+
+for f in Dockerfile Dockerfile.prebuilt .dockerignore docker-entrypoint.sh; do
+    [ -f "${SCRIPT_DIR}/${f}" ] && cp -f "${SCRIPT_DIR}/${f}" "${BUILD_DIR}/${f}"
 done
-info "  构建文件就绪 (Dockerfile + entrypoint + dockerignore → ${BUILD_DIR}/)"
+
+# 自动检测：宿主编译好的 PHP 存在 → 快速模式；不存在 → Docker 内编译
+if [ -f "/opt/php/bin/php" ] && [ -f "/opt/httpd/bin/httpd" ]; then
+    info "  检测到预编译 PHP/Apache → 快速构建模式"
+    cp -r /opt/php "${BUILD_DIR}/php" 2>/dev/null || true
+    cp -r /opt/httpd "${BUILD_DIR}/httpd" 2>/dev/null || true
+    DOCKERFILE="${BUILD_DIR}/Dockerfile.prebuilt"
+else
+    info "  未检测到预编译 → Docker 内编译（约 5-15 分钟）"
+    DOCKERFILE="${BUILD_DIR}/Dockerfile"
+fi
 
 # ---- 4. Docker 构建 ----
-info "[4/9] Docker 多阶段编译（约 5-15 分钟，请耐心等待）..."
+info "[4/9] Docker 构建..."
+# 复制本地编译包到构建上下文（Dockerfile 内 COPY 替代 wget 下载）
+for pkg in libzip-1.10.1.tar.gz onig-6.9.9.tar.gz httpd-2.4.62.tar.gz php-8.1.27.tar.gz; do
+    [ -f "${SCRIPT_DIR}/${pkg}" ] && cp "${SCRIPT_DIR}/${pkg}" "${BUILD_DIR}/${pkg}" && info "  ${pkg} → 构建上下文" || true
+done
+# 强制删除所有已退出/已停止容器 + 旧镜像 + <none> 悬空镜像
+docker rm -f zentao 2>/dev/null || true
+docker container prune -f 2>/dev/null || true
+docker rmi -f "${FULL_IMAGE}" "${LATEST_IMAGE}" 2>/dev/null || true
+docker image prune -f 2>/dev/null || true
 cd "${BUILD_DIR}"
-docker build \
+docker build --no-cache \
     --build-arg "ZENTAO_VERSION=${ZENTAO_VERSION}" \
     -t "${FULL_IMAGE}" \
     -t "${LATEST_IMAGE}" \
-    -f Dockerfile \
-    . 2>&1 | tail -20
+    -f "${DOCKERFILE}" \
+    .
 info "  镜像构建完成: ${FULL_IMAGE}"
 
 # ---- 5. 列出镜像 ----

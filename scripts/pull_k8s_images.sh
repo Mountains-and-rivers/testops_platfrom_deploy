@@ -79,7 +79,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- 确定输出目录 ----
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "${HOME}")"
 if [[ -z "$OUTPUT_DIR" ]]; then
     # 默认输出到 Master ~/k8s-images/
     OUTPUT_DIR="$HOME/k8s-images"

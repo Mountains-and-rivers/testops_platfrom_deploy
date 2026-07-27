@@ -30,9 +30,6 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
 
 [PowerTools]
 name=CentOS-Stream-$stream - PowerTools - mirrors.aliyun.com
-baseurl=https://mirrors.aliyun.com/centos-stream/$stream/PowerTools/$basearch/os/
-        http://mirrors.aliyuncs.com/centos-stream/$stream/PowerTools/$basearch/os/
-        http://mirrors.cloud.aliyuncs.com/centos-stream/$stream/PowerTools/$basearch/os/
-gpgcheck=1
+baseurl=https://mirrors.aliyun.com/centos-stream/9/PowerTools/$basearch/os/
+gpgcheck=0
 enabled=0
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
