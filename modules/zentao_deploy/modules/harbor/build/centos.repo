@@ -1,0 +1,35 @@
+# CentOS Stream 9 - Base Repositories (aliyun mirrors)
+#
+
+[base]
+name=CentOS-Stream-$stream - Base - mirrors.aliyun.com
+baseurl=https://mirrors.aliyun.com/centos-stream/$stream/BaseOS/$basearch/os/
+        http://mirrors.aliyuncs.com/centos-stream/$stream/BaseOS/$basearch/os/
+        http://mirrors.cloud.aliyuncs.com/centos-stream/$stream/BaseOS/$basearch/os/
+gpgcheck=1
+enabled=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+
+[AppStream]
+name=CentOS-Stream-$stream - AppStream - mirrors.aliyun.com
+baseurl=https://mirrors.aliyun.com/centos-stream/$stream/AppStream/$basearch/os/
+        http://mirrors.aliyuncs.com/centos-stream/$stream/AppStream/$basearch/os/
+        http://mirrors.cloud.aliyuncs.com/centos-stream/$stream/AppStream/$basearch/os/
+gpgcheck=1
+enabled=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+
+[centosplus]
+name=CentOS-Stream-$stream - Plus - mirrors.aliyun.com
+baseurl=https://mirrors.aliyun.com/centos-stream/$stream/centosplus/$basearch/os/
+        http://mirrors.aliyuncs.com/centos-stream/$stream/centosplus/$basearch/os/
+        http://mirrors.cloud.aliyuncs.com/centos-stream/$stream/centosplus/$basearch/os/
+gpgcheck=1
+enabled=0
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+
+[PowerTools]
+name=CentOS-Stream-$stream - PowerTools - mirrors.aliyun.com
+baseurl=https://mirrors.aliyun.com/centos-stream/9/PowerTools/$basearch/os/
+gpgcheck=0
+enabled=0

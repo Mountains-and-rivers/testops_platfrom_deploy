@@ -51,6 +51,55 @@ def _is_master_initialized(ssh: SSHClient) -> bool:
     return False
 
 
+def _cleanup_partial_init(ssh: SSHClient, hostname: str) -> bool:
+    """检测并清理 kubeadm init 半残状态（如 PKI 不完整、admin.conf 缺失、API Server 宕机）。
+    返回 True 表示已执行清理，需重新 init。
+    """
+    admin_ok, _ = ssh.exec_command("test -f /etc/kubernetes/admin.conf && echo YES || echo NO", timeout=5)
+    pki_ok, _ = ssh.exec_command("test -d /etc/kubernetes/pki -a -f /etc/kubernetes/pki/ca.crt && echo YES || echo NO", timeout=5)
+    etcd_ok, _ = ssh.exec_command("test -d /var/lib/etcd/member && echo YES || echo NO", timeout=5)
+    apiserver_ok, _ = ssh.exec_command(
+        "kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw /healthz 2>/dev/null | grep -q ok && echo YES || echo NO",
+        timeout=5
+    )
+    admin_ok = admin_ok.strip()
+    pki_ok = pki_ok.strip()
+    etcd_ok = etcd_ok.strip()
+    apiserver_ok = apiserver_ok.strip()
+
+    need_reset = False
+    reason = ""
+
+    # 情况1: PKI 存在但 admin.conf 缺失 → 半残
+    if "YES" in pki_ok and "NO" in admin_ok:
+        need_reset = True
+        reason = "PKI 存在但 admin.conf 缺失"
+    # 情况2: admin.conf 存在但 API Server 不响应
+    elif "YES" in admin_ok and "NO" in apiserver_ok:
+        need_reset = True
+        reason = "admin.conf 存在但 API Server 不响应"
+    # 情况3: etcd 数据存在但 admin.conf 缺失
+    elif "YES" in etcd_ok and "NO" in admin_ok:
+        need_reset = True
+        reason = "etcd 数据存在但 admin.conf 缺失"
+    # 情况4: 任何 K8s 残留但 kubelet 已停止
+    elif "YES" in pki_ok or "YES" in etcd_ok:
+        _, kubelet, _ = ssh.exec_command("systemctl is-active kubelet 2>/dev/null || echo INACTIVE", timeout=5)
+        if "INACTIVE" in kubelet:
+            need_reset = True
+            reason = "K8s 残留文件存在且 kubelet 已停止"
+
+    if need_reset:
+        logger.warning(f"[{hostname}] 检测到半残状态({reason})，自动 kubeadm reset...")
+        ssh.exec_command(
+            "kubeadm reset --force --cri-socket=unix:///var/run/containerd/containerd.sock 2>&1 || true; "
+            "rm -rf /etc/kubernetes/ /var/lib/kubelet/ /var/lib/etcd/ /root/.kube/ 2>/dev/null || true",
+            sudo=False, timeout=120
+        )
+        return True
+    return False
+
+
 def _verify_master(ssh: SSHClient, hostname: str, expected_version: str) -> None:
     """安装后扫描验证 Master 节点和集群状态。参考 stage2/stage3 验证模式。"""
     logger.info(f"[{hostname}] 安装后扫描验证...")
@@ -261,6 +310,9 @@ def run_master_init(state: WorkflowStateManager) -> None:
             return
 
         logger.info(f"[{hostname}] 开始 Master 节点初始化...")
+
+        # 0. 检测并清理各种半残状态
+        _cleanup_partial_init(ssh, hostname)
 
         # 1. 生成 kubeadm init 配置文件
         cert_sans = [ip, hostname]
