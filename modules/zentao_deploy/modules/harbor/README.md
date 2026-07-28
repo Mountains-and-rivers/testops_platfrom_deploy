@@ -148,6 +148,8 @@ pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 - **账号**: `admin` / `Harbor12345`
 - **本机 hosts**: `192.168.0.102 harbor.testops.local`
 
+![Harbor 登录页](../../../docs/images/harbor_test_result.png)
+
 ## 使用 Harbor
 
 ```bash
