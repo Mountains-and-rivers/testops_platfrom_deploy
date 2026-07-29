@@ -12,7 +12,7 @@ _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/
 
 # 本地镜像加载: 脚本同目录 .tar 文件优先 docker load
 load_local_image() {
-    local tar_file="$1" image_name="$2"
+    local tar_file="${1:-}"
     if [ -f "${_SCRIPT_DIR}/${tar_file}" ]; then
         info "  加载本地镜像: ${tar_file}"
         docker load -i "${_SCRIPT_DIR}/${tar_file}" && return 0
@@ -39,11 +39,11 @@ command -v docker &>/dev/null && info "  Docker $(docker --version 2>&1 | awk '{
 systemctl is-active docker &>/dev/null || { systemctl start docker; systemctl enable docker; }
 if docker images centos:stream9 --format '{{.Tag}}' 2>/dev/null | grep -q .; then
     info "  centos:stream9 已缓存"
-elif load_local_image "centos-stream9.tar" "centos:stream9"; then
-    info "  centos:stream9 已加载"
 else
-    docker pull quay.io/centos/centos:stream9 2>/dev/null && docker tag quay.io/centos/centos:stream9 centos:stream9 \
-        || docker pull centos:stream9 2>/dev/null \
+    # 优先级: Docker Hub → quay.io → 本地 tar
+    docker pull centos:stream9 2>/dev/null && info "  centos:stream9 (Docker Hub)" \
+        || { docker pull quay.io/centos/centos:stream9 2>/dev/null && docker tag quay.io/centos/centos:stream9 centos:stream9 && info "  centos:stream9 (quay.io)"; } \
+        || { load_local_image "centos-stream9.tar" && info "  centos:stream9 (本地 tar)"; } \
         || { warn "  centos:stream9 拉取失败"; FAILED=1; }
 fi
 [ $FAILED -eq 1 ] && err "依赖检查未通过"
@@ -54,6 +54,8 @@ BUILD_CTX="/tmp/harbor-photon-build"
 rm -rf "${BUILD_CTX}"
 mkdir -p "${BUILD_CTX}"
 [ -f "${_SCRIPT_DIR}/centos.repo" ] && cp "${_SCRIPT_DIR}/centos.repo" "${BUILD_CTX}/" || err "centos.repo 缺失"
+# 禁用 centosplus（阿里云镜像经常超时）
+sed -i '/^\[centosplus\]/,/^\[/{s/^enabled=1/enabled=0/}' "${BUILD_CTX}/centos.repo" 2>/dev/null || true
 
 # ---- 2. 生成 Dockerfile ----
 step "[2/4] 生成 Dockerfile..."
@@ -70,6 +72,14 @@ RUN dnf install -y epel-release && \
     echo 'baseurl=https://mirrors.aliyun.com/epel/$releasever/Everything/$basearch/' >> /etc/yum.repos.d/epel.repo && \
     echo 'enabled=1' >> /etc/yum.repos.d/epel.repo && \
     echo 'gpgcheck=0' >> /etc/yum.repos.d/epel.repo
+
+# 确保 AppStream 可用（子镜像安装 postgresql-server 等包的来源）
+RUN echo '[appstream]' >> /etc/yum.repos.d/centos.repo && \
+    echo 'name=CentOS Stream - AppStream' >> /etc/yum.repos.d/centos.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/centos-stream/9-stream/AppStream/$basearch/os/' >> /etc/yum.repos.d/centos.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/centos.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/centos.repo && \
+    dnf makecache
 
 # 仅运行时包 — 仿官方 photon，不装编译工具链
 # 对标: tdnf install -y tzdata shadow curl openssl gzip findutils cronie logrotate ...

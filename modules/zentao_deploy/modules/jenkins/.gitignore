@@ -1,0 +1,3 @@
+# 大文件压缩包，不上传 git，请参考 filelist.txt 手动下载
+*.tar.gz
+*.zip

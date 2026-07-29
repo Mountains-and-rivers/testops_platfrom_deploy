@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# Harbor 卸载清理
+# Harbor 卸载清理（全量：容器/镜像/目录/数据/端口）
 # 用法: bash clean_harbor.sh [--data]
 #   --data   含持久化数据 /data/harbor
 # ============================================================
@@ -32,34 +32,41 @@ if [ -f "${INSTALL_DIR}/docker-compose.yml" ]; then
     cd "${INSTALL_DIR}"
     docker compose down -v 2>/dev/null || docker-compose down -v 2>/dev/null || true
 fi
-# 强制删除可能残留的 Harbor 容器
-docker rm -f nginx harbor-core harbor-portal harbor-jobservice \
+docker rm -f \
+    nginx harbor-core harbor-portal harbor-jobservice \
     registry registryctl harbor-db redis harbor-log harbor-valkey \
+    prepare-fix \
     2>/dev/null || true
 info "已停止"
 
-# ---- 2. 目录 ----
+# ---- 2. 目录（安装/构建/Go/证书/日志/registry数据）----
 step "[2/8] 目录..."
-[ -d "${INSTALL_DIR}" ] && rm -rf "${INSTALL_DIR}" && info "${INSTALL_DIR}" || true
-[ -d "${BUILD_DIR}" ]     && rm -rf "${BUILD_DIR}"     && info "${BUILD_DIR}"     || true
-[ -d "${GO_DIR}" ]        && rm -rf "${GO_DIR}"        && info "${GO_DIR}"        || true
-[ -d /data/secret ]       && rm -rf /data/secret       && info "/data/secret"     || true
+[ -d "${INSTALL_DIR}" ]  && rm -rf "${INSTALL_DIR}"  && info "${INSTALL_DIR}"  || true
+[ -d "${BUILD_DIR}" ]    && rm -rf "${BUILD_DIR}"    && info "${BUILD_DIR}"    || true
+[ -d "${GO_DIR}" ]       && rm -rf "${GO_DIR}"       && info "${GO_DIR}"       || true
+[ -d /data/secret ]      && rm -rf /data/secret      && info "/data/secret"    || true
+[ -d /data/registry ]    && rm -rf /data/registry    && info "/data/registry"  || true
+[ -d /var/log/harbor ]   && rm -rf /var/log/harbor   && info "/var/log/harbor" || true
 
 # ---- 3. 临时文件 ----
 step "[3/8] 临时文件..."
-rm -rf /tmp/harbor_extract /tmp/harbor_cfg /tmp/harbor-pkg \
+rm -rf \
+    /tmp/harbor_extract /tmp/harbor_cfg /tmp/harbor-pkg \
     /tmp/harbor-src-* /tmp/harbor-offline-installer-* \
     /tmp/harbor-base-build /tmp/harbor-photon-build /tmp/harbor-test \
-    /tmp/Dockerfile.* /tmp/centos.repo \
+    /tmp/Dockerfile.* /tmp/centos.repo /tmp/htpasswd.py \
     /tmp/go*.tar.gz /tmp/node-*.tar.xz /tmp/dpkg_*.tar.xz \
     /tmp/spectral-linux-x64 /tmp/build-cache \
     2>/dev/null || true
 info "临时文件"
 
-# ---- 4. Harbor 组件镜像 ----
+# ---- 4. Harbor 组件镜像（goharbor + 私有仓库标签）----
 step "[4/8] Harbor 组件镜像..."
 docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | \
-    grep -iE 'goharbor|testops.*harbor|testops.*nginx|testops.*prepare|testops.*registry|testops.*valkey|testops.*trivy' | \
+    grep -iE 'goharbor|/harbor-|/nginx-photon|/registry-photon|/prepare|/trivy-adapter' | \
+    xargs -r docker rmi -f 2>/dev/null || true
+docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | \
+    grep -iE 'testops.*(harbor|nginx|prepare|registry|valkey|trivy)' | \
     xargs -r docker rmi -f 2>/dev/null || true
 info "组件镜像"
 
@@ -77,15 +84,16 @@ docker rmi -f \
     2>/dev/null || true
 info "外部镜像"
 
-# ---- 7. 清理悬空镜像和构建缓存 ----
+# ---- 7. 悬空镜像 + 构建缓存 + 网络 ----
 step "[7/8] 悬空镜像 + 构建缓存..."
 docker image prune -a -f 2>/dev/null || true
 docker builder prune -a -f 2>/dev/null || true
 docker container prune -f 2>/dev/null || true
 docker network prune -f 2>/dev/null || true
+docker volume prune -a -f 2>/dev/null || true
 info "已清理"
 
-# ---- 8. 数据和端口 ----
+# ---- 8. 数据 + 防火墙 ----
 step "[8/8] 数据 + 防火墙..."
 if ${REMOVE_DATA}; then
     [ -d "${DATA_DIR}" ] && rm -rf "${DATA_DIR}" && info "${DATA_DIR}" || true

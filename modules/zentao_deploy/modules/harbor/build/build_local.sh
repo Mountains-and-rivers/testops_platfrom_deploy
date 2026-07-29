@@ -21,7 +21,6 @@ BUILD_DIR="${BUILD_DIR:-/opt/build/harbor}"
 GO_DIR="/usr/local/go"
 GO_BIN="${GO_DIR}/bin/go"
 HARBOR_REPO="https://github.com/goharbor/harbor.git"
-BASE_IMAGE="harbor-base:centos9"
 PHOTON_IMAGE="goharbor/photon:5.0"
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
@@ -42,6 +41,104 @@ warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 step() { echo -e "${CYAN}[STEP]${NC}  $*"; }
 err()  { echo -e "\n${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${RED}  ✗ ${BASH_SOURCE[0]}:${BASH_LINENO[0]}${NC}"; echo -e "${RED}  $*${NC}"; echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; exit 1; }
 trap 'err "脚本异常退出 (exit code=$?)"' ERR
+
+# ════════════════════════════════════════════════════════════
+# Photon → CentOS Dockerfile 兼容修复
+# 用法: _apply_photon_fixes <源码目录>
+# 设计: 直调 sed，不用 eval；逐文件检查→修复→验证；幂等可重入
+# ════════════════════════════════════════════════════════════
+_apply_photon_fixes() {
+    local src_dir="$1"
+    info "  Photon → CentOS Dockerfile 修复..."
+
+    # 列出所有 Dockerfile（包括 .base 等变体）
+    local all_files
+    all_files=$(find "${src_dir}" -name 'Dockerfile*' -type f 2>/dev/null || true)
+    [ -z "${all_files}" ] && { info "    ✓ 无 Dockerfile"; return 0; }
+
+    local fixed=0 skipped=0
+    while IFS= read -r f; do
+        [ -n "${f}" ] || continue
+        [ -f "${f}" ] || continue
+        [ -r "${f}" ] || { warn "    无法读取: ${f#${src_dir}/}"; skipped=$((skipped + 1)); continue; }
+        [ -w "${f}" ] || { warn "    无法写入: ${f#${src_dir}/}"; skipped=$((skipped + 1)); continue; }
+
+        # 无条件修复（sed 幂等，不会破坏已修复的文件）
+        info "    修复: ${f#${src_dir}/}"
+        cp -a "${f}" "${f}.bak"
+
+        # 直接 sed（不用 eval，每一行模式都是确定性的字符串）
+        sed -i \
+            -e 's|tdnf |dnf |g' \
+            -e '/photon-snapshot\.repo/d' \
+            -e '/photon-snapshot/d' \
+            -e 's|rm /etc/cron.daily/logrotate|rm -f /etc/cron.daily/logrotate|g' \
+            -e 's|postgresql18-server|postgresql-server|g' \
+            -e 's|postgresql15-server|postgresql-server|g' \
+            -e 's|postgresql18-contrib|postgresql-contrib|g' \
+            -e 's|postgresql15-contrib|postgresql-contrib|g' \
+            -e 's|postgresql18-devel|postgresql-devel|g' \
+            -e 's|postgresql15-devel|postgresql-devel|g' \
+            -e 's|/usr/pgsql/18/share/postgresql/|/usr/share/postgresql/|g' \
+            -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
+            -e 's|/usr/pgsql/15/share/postgresql/|/usr/share/postgresql/|g' \
+            -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
+            -e 's|groupadd -g 999 |groupadd -f -g 999 |g' \
+            -e 's|groupadd -r -g 10000 |groupadd -f -r -g 10000 |g' \
+            -e 's|groupadd -r postgres --gid=999|groupadd -r postgres|g' \
+            -e 's|useradd -m -r -g postgres --uid=999 postgres|useradd -m -r -g postgres postgres|g' \
+            -e 's|useradd -u 999 -g 999 |useradd -r -g 999 |g' \
+            -e 's|useradd -r -c "Valkey|useradd -r -g 999 -c "Valkey|g' \
+            "${f}"
+
+        # 验证：sed 后不能还有 postgresql15/18-server
+        if grep -qE 'postgresql(15|18)-server' "${f}" 2>/dev/null; then
+            warn "    ⚠ sed 未命中，管道兜底: ${f#${src_dir}/}"
+            tr -d '\r' < "${f}.bak" | sed \
+                -e 's|postgresql18-server|postgresql-server|g' \
+                -e 's|postgresql15-server|postgresql-server|g' \
+                -e 's|postgresql18-contrib|postgresql-contrib|g' \
+                -e 's|postgresql15-contrib|postgresql-contrib|g' \
+                -e 's|postgresql18-devel|postgresql-devel|g' \
+                -e 's|postgresql15-devel|postgresql-devel|g' \
+                -e 's|/usr/pgsql/18/share/postgresql/|/usr/share/postgresql/|g' \
+            -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
+                -e 's|/usr/pgsql/15/share/postgresql/|/usr/share/postgresql/|g' \
+            -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
+                -e 's|tdnf |dnf |g' \
+                > "${f}.fix" && mv "${f}.fix" "${f}"
+            if grep -qE 'postgresql(15|18)-server' "${f}" 2>/dev/null; then
+                warn "    ❌ 仍无法修复，保留备份 ${f}.bak"
+                skipped=$((skipped + 1))
+                continue
+            fi
+        fi
+        rm -f "${f}.bak"
+        fixed=$((fixed + 1))
+    done <<< "${all_files}"
+
+    # 终验：不能有残留
+    local leftover
+    leftover=$(grep -rlE 'postgresql(15|18)-server' "${src_dir}" --include='Dockerfile*' 2>/dev/null || true)
+    if [ -n "${leftover}" ]; then
+        warn "    ❌ ${skipped}个跳过 ${fixed}个已修复，但以下文件仍有postgresql15/18-server残留:"
+        while IFS= read -r f; do [ -n "${f}" ] && warn "      ${f#${src_dir}/}"; done <<< "${leftover}"
+        err "Dockerfile 修复失败，无法构建"
+    fi
+    info "    ✓ ${fixed}个文件已修复${skipped:+, ${skipped}个跳过}"
+
+    # common/Dockerfile: FROM photon → FROM centos
+    local cdf="${src_dir}/make/photon/common/Dockerfile"
+    if [ -f "${cdf}" ]; then
+        if grep -q 'photon:5.0-20260214' "${cdf}" 2>/dev/null; then
+            sed -i 's|FROM photon:5.0-20260214|FROM centos:stream9|' "${cdf}"
+            info "    ✓ common/Dockerfile: photon → centos"
+        fi
+        if grep -q 'photon-repos' "${cdf}" 2>/dev/null; then
+            sed -i 's|dnf install photon-repos -y|dnf install -y epel-release|' "${cdf}"
+        fi
+    fi
+}
 
 echo "============================================"
 echo "  Harbor ${HARBOR_VER} 源码编译 + 镜像构建"
@@ -72,30 +169,44 @@ if [ -x "${GO_BIN}" ]; then
     info "  ✓ Go $(${GO_BIN} version 2>&1 | awk '{print $3}') (${GO_DIR})"
     export PATH="${GO_DIR}/bin:${PATH}"
 elif command -v go &>/dev/null; then
-    go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
-    go env -w GO111MODULE=on 2>/dev/null || true
+    go env -w GOPROXY=https://goproxy.cn 2>/dev/null || true
+    go env -w GONOSUMCHECK=* GONOSUMDB=* GO111MODULE=on 2>/dev/null || true
     info "  ✓ Go $(go version 2>&1 | awk '{print $3}') (系统)"
 else
     warn "  安装 Go..."
     GO_TGZ="go1.26.4.linux-amd64.tar.gz"
-    # 优先本地: 脚本目录 → 缓存目录
+    _found=false
+    # 优先本地: 脚本目录 → 缓存目录（带完整性校验）
     for d in "${_SCRIPT_DIR}/" "/tmp/build-cache/"; do
-        [ -f "${d}${GO_TGZ}" ] && cp "${d}${GO_TGZ}" /tmp/ && info "  Go 使用本地: ${d}${GO_TGZ}" && break
+        if [ -f "${d}${GO_TGZ}" ] && [ -s "${d}${GO_TGZ}" ]; then
+            if tar -tzf "${d}${GO_TGZ}" >/dev/null 2>&1; then
+                cp "${d}${GO_TGZ}" /tmp/ && info "  Go 使用本地: ${d}${GO_TGZ}" && _found=true && break
+            else
+                warn "  Go 本地包损坏，删除: ${d}${GO_TGZ}"; rm -f "${d}${GO_TGZ}"
+            fi
+        fi
     done
-    # 本地没有则下载
-    if [ ! -f "/tmp/${GO_TGZ}" ]; then
-        wget -q --show-progress -O "/tmp/${GO_TGZ}" "https://go.dev/dl/${GO_TGZ}" \
-            || curl -L -o "/tmp/${GO_TGZ}" "https://go.dev/dl/${GO_TGZ}" \
-            || { warn "  ✗ Go 下载失败"; FAILED=1; }
+    # 本地没有或损坏则下载（带重试和校验）
+    if ! ${_found}; then
+        for i in 1 2 3; do
+            info "  Go 下载 (${i}/3): https://go.dev/dl/${GO_TGZ}"
+            wget -q --show-progress -O "/tmp/${GO_TGZ}" "https://go.dev/dl/${GO_TGZ}" 2>/dev/null || \
+                curl -L -o "/tmp/${GO_TGZ}" "https://go.dev/dl/${GO_TGZ}" || true
+            if tar -tzf "/tmp/${GO_TGZ}" >/dev/null 2>&1; then
+                _found=true; break
+            fi
+            warn "  Go 下载包校验失败 (${i}/3)"; rm -f "/tmp/${GO_TGZ}"; sleep 5
+        done
     fi
-    if [ $FAILED -eq 0 ]; then
+    if ${_found}; then
         rm -rf "${GO_DIR}"
-        tar -C /usr/local -xzf "/tmp/${GO_TGZ}"
-        rm -f "/tmp/${GO_TGZ}"
+        tar -C /usr/local -xzf "/tmp/${GO_TGZ}" && rm -f "/tmp/${GO_TGZ}"
         export PATH="${GO_DIR}/bin:${PATH}"
         go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
         go env -w GO111MODULE=on 2>/dev/null || true
         info "  ✓ Go $(go version 2>&1 | awk '{print $3}') (${GO_DIR})"
+    else
+        warn "  ✗ Go 下载失败"; FAILED=1
     fi
 fi
 
@@ -107,11 +218,11 @@ DISK_GB=$(df -BG /opt 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G')
 [ $FAILED -eq 1 ] && err "依赖检查未通过，请修复后重试"
 
 # ---- 0-b. 确保基础镜像存在 ----
-step "[0-b/9] 检查基础镜像 ${BASE_IMAGE}..."
-if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${BASE_IMAGE}$"; then
-    info "  ✓ ${BASE_IMAGE} 已存在"
+step "[0-b/9] 检查基础镜像 ${PHOTON_IMAGE}..."
+if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${PHOTON_IMAGE}$"; then
+    info "  ✓ ${PHOTON_IMAGE} 已存在"
 else
-    warn "  ${BASE_IMAGE} 不存在，自动构建..."
+    warn "  ${PHOTON_IMAGE} 不存在，自动构建..."
     BASED_SCRIPT="${_SCRIPT_DIR}/build_base.sh"
     if [ -f "${BASED_SCRIPT}" ]; then
         info "  调用: bash ${BASED_SCRIPT}"
@@ -124,74 +235,142 @@ fi
 # 确保 photon 标签也存在
 if ! docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${PHOTON_IMAGE}$"; then
     info "  补充 Photon 标签: ${PHOTON_IMAGE}"
-    docker tag "${BASE_IMAGE}" "${PHOTON_IMAGE}"
+    docker tag "${PHOTON_IMAGE}" "${PHOTON_IMAGE}"
 fi
 
-# ---- 1. 构建 golang:1.26.4（基于 harbor-base:centos9）----
-step "[1/9] 构建 golang:1.26.4 (基于 ${BASE_IMAGE})..."
+# ---- 1. 构建 golang:1.26.4（FROM centos:stream9 + 编译工具 + Go）----
+step "[1/9] 构建 golang:1.26.4 (基于 centos:stream9)..."
 docker rmi -f golang:1.26.4 2>/dev/null || true
 
 GO_ARCHIVE="go1.26.4.linux-amd64.tar.gz"
+_found=false
 for d in "${_SCRIPT_DIR}/" "/tmp/build-cache/"; do
-    [ -f "${d}${GO_ARCHIVE}" ] && cp "${d}${GO_ARCHIVE}" /tmp/ && info "  Go 使用本地: ${d}${GO_ARCHIVE}" && break
+    if [ -f "${d}${GO_ARCHIVE}" ] && [ -s "${d}${GO_ARCHIVE}" ]; then
+        if tar -tzf "${d}${GO_ARCHIVE}" >/dev/null 2>&1; then
+            cp "${d}${GO_ARCHIVE}" /tmp/ && info "  Go 使用本地: ${d}${GO_ARCHIVE}" && _found=true && break
+        else
+            warn "  Go 本地包损坏，删除: ${d}${GO_ARCHIVE}"; rm -f "${d}${GO_ARCHIVE}"
+        fi
+    fi
 done
-if [ ! -f "/tmp/${GO_ARCHIVE}" ]; then
-    wget --show-progress -O "/tmp/${GO_ARCHIVE}" "https://go.dev/dl/${GO_ARCHIVE}" \
-        || err "下载失败: https://go.dev/dl/${GO_ARCHIVE}"
+if ! ${_found}; then
+    for i in 1 2 3; do
+        info "  Go 下载 (${i}/3): https://go.dev/dl/${GO_ARCHIVE}"
+        wget -q --show-progress -O "/tmp/${GO_ARCHIVE}" "https://go.dev/dl/${GO_ARCHIVE}" 2>/dev/null || \
+            curl -L -o "/tmp/${GO_ARCHIVE}" "https://go.dev/dl/${GO_ARCHIVE}" || true
+        if tar -tzf "/tmp/${GO_ARCHIVE}" >/dev/null 2>&1; then _found=true; break; fi
+        warn "  Go 校验失败 (${i}/3)"; rm -f "/tmp/${GO_ARCHIVE}"; sleep 5
+    done
+    ${_found} || err "Go 下载失败或包损坏: https://go.dev/dl/${GO_ARCHIVE}"
 fi
 
-# Dockerfile.golang — 极简：仅添加 Go，依赖全由基础镜像提供
+# 准备构建上下文：centos.repo + dpkg 必须和 Dockerfile 同目录（/tmp）
+cp "${_SCRIPT_DIR}/centos.repo" /tmp/centos.repo 2>/dev/null || true
+cp "${_SCRIPT_DIR}/dpkg_1.22.22.tar.xz" /tmp/dpkg_1.22.22.tar.xz 2>/dev/null || true
+
+# Dockerfile.golang — FROM centos:stream9 + 编译工具 + dpkg + Go
 cat > /tmp/Dockerfile.golang << 'DOCKERFILE_GO'
-FROM harbor-base:centos9
+FROM centos:stream9
+COPY centos.repo /etc/yum.repos.d/centos.repo
+COPY dpkg_1.22.22.tar.xz /tmp/
+
+RUN dnf install -y epel-release && \
+    rm -f /etc/yum.repos.d/epel*.repo && \
+    echo '[epel]' > /etc/yum.repos.d/epel.repo && \
+    echo 'name=EPEL - Aliyun' >> /etc/yum.repos.d/epel.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/epel/$releasever/Everything/$basearch/' >> /etc/yum.repos.d/epel.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/epel.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/epel.repo
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+        gcc gcc-c++ make git perl autoconf automake libtool patch \
+        gettext-devel glibc-devel kernel-headers \
+        openssl-devel libmd-devel ncurses-devel zlib-devel bzip2-devel \
+        python3 python3-pip tar xz && \
+    dnf clean all && rm -rf /var/cache/dnf
+
+RUN mkdir -p /tmp/dpkg && cd /tmp/dpkg && \
+    cp /tmp/dpkg_1.22.22.tar.xz dpkg.tar.xz && \
+    tar -xJf dpkg.tar.xz --strip-components=1 && rm -f dpkg.tar.xz && \
+    ./configure --disable-nls --prefix=/usr && make -j$(nproc) && make install && \
+    cd / && rm -rf /tmp/dpkg /tmp/dpkg_1.22.22.tar.xz && ldconfig && \
+    dnf remove -y autoconf automake libtool patch gettext-devel kernel-headers 2>/dev/null || true && \
+    dnf clean all && rm -rf /var/cache/dnf /tmp/*
 
 COPY go1.26.4.linux-amd64.tar.gz /tmp/
-RUN echo ">>> 安装 Go..." && \
-    tar -C /usr/local -xzf /tmp/go1.26.4.linux-amd64.tar.gz && \
-    rm /tmp/go1.26.4.linux-amd64.tar.gz
+RUN tar -C /usr/local -xzf /tmp/go1.26.4.linux-amd64.tar.gz && rm /tmp/go1.26.4.linux-amd64.tar.gz
 
-ENV GOROOT=/usr/local/go \
-    GOPATH=/go \
-    GOPROXY=https://goproxy.cn,direct \
-    GO111MODULE=on \
-    GONOSUMCHECK=* \
-    GONOSUMDB=* \
-    GONOPROXY= \
+ENV GOROOT=/usr/local/go GOPATH=/go GOPROXY=https://goproxy.cn,direct GO111MODULE=on \
+    GONOSUMCHECK=* GONOSUMDB=* GONOPROXY= \
     PATH=/usr/local/go/bin:/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-RUN mkdir -p /go && go env GOPROXY && go env GOPATH && go version
+RUN mkdir -p /go && go version
 DOCKERFILE_GO
 
 docker build --progress=plain --no-cache -t golang:1.26.4 -f /tmp/Dockerfile.golang /tmp
 rm -f /tmp/Dockerfile.golang "/tmp/${GO_ARCHIVE}"
 info "  ✓ golang:1.26.4"
 
-# ---- 2. 构建 node:22.22.3（基于 harbor-base:centos9）----
-step "[2/9] 构建 node:22.22.3 (基于 ${BASE_IMAGE})..."
+# ---- 2. 构建 node:22.22.3（FROM centos:stream9 + 编译工具 + Node.js）----
+step "[2/9] 构建 node:22.22.3 (基于 centos:stream9)..."
 docker rmi -f node:22.22.3 2>/dev/null || true
 
 NODE_ARCHIVE="node-v22.22.3-linux-x64.tar.xz"
+_found=false
 for d in "${_SCRIPT_DIR}/" "/tmp/build-cache/"; do
-    [ -f "${d}${NODE_ARCHIVE}" ] && cp "${d}${NODE_ARCHIVE}" /tmp/ && info "  Node 使用本地: ${d}${NODE_ARCHIVE}" && break
+    if [ -f "${d}${NODE_ARCHIVE}" ] && [ -s "${d}${NODE_ARCHIVE}" ]; then
+        if tar -tJf "${d}${NODE_ARCHIVE}" >/dev/null 2>&1; then
+            cp "${d}${NODE_ARCHIVE}" /tmp/ && info "  Node 使用本地: ${d}${NODE_ARCHIVE}" && _found=true && break
+        else
+            warn "  Node 本地包损坏，删除: ${d}${NODE_ARCHIVE}"; rm -f "${d}${NODE_ARCHIVE}"
+        fi
+    fi
 done
-if [ ! -f "/tmp/${NODE_ARCHIVE}" ]; then
-    wget --show-progress -O "/tmp/${NODE_ARCHIVE}" "https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}" \
-        || err "下载失败: https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}"
+if ! ${_found}; then
+    for i in 1 2 3; do
+        info "  Node 下载 (${i}/3): https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}"
+        wget -q --show-progress -O "/tmp/${NODE_ARCHIVE}" "https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}" 2>/dev/null || \
+            curl -L -o "/tmp/${NODE_ARCHIVE}" "https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}" || true
+        if tar -tJf "/tmp/${NODE_ARCHIVE}" >/dev/null 2>&1; then _found=true; break; fi
+        warn "  Node 校验失败 (${i}/3)"; rm -f "/tmp/${NODE_ARCHIVE}"; sleep 5
+    done
+    ${_found} || err "Node 下载失败或包损坏: https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}"
 fi
 
-# Dockerfile.node — 极简：仅添加 Node.js
+# Dockerfile.node — FROM centos:stream9 + 编译工具 + dpkg + Node.js
 cat > /tmp/Dockerfile.node << 'DOCKERFILE_NODE'
-FROM harbor-base:centos9
+FROM centos:stream9
+COPY centos.repo /etc/yum.repos.d/centos.repo
+COPY dpkg_1.22.22.tar.xz /tmp/
+
+RUN dnf install -y epel-release && \
+    rm -f /etc/yum.repos.d/epel*.repo && \
+    echo '[epel]' > /etc/yum.repos.d/epel.repo && \
+    echo 'name=EPEL - Aliyun' >> /etc/yum.repos.d/epel.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/epel/$releasever/Everything/$basearch/' >> /etc/yum.repos.d/epel.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/epel.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/epel.repo
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+        gcc gcc-c++ make git perl autoconf automake libtool patch \
+        gettext-devel glibc-devel kernel-headers \
+        openssl-devel libmd-devel ncurses-devel zlib-devel bzip2-devel \
+        python3 python3-pip tar xz && \
+    dnf clean all && rm -rf /var/cache/dnf
+
+RUN mkdir -p /tmp/dpkg && cd /tmp/dpkg && \
+    cp /tmp/dpkg_1.22.22.tar.xz dpkg.tar.xz && \
+    tar -xJf dpkg.tar.xz --strip-components=1 && rm -f dpkg.tar.xz && \
+    ./configure --disable-nls --prefix=/usr && make -j$(nproc) && make install && \
+    cd / && rm -rf /tmp/dpkg /tmp/dpkg_1.22.22.tar.xz && ldconfig && \
+    dnf remove -y autoconf automake libtool patch gettext-devel kernel-headers 2>/dev/null || true && \
+    dnf clean all && rm -rf /var/cache/dnf /tmp/*
 
 COPY node-v22.22.3-linux-x64.tar.xz /tmp/
-RUN echo ">>> 安装 Node.js..." && \
-    tar -C /usr/local --strip-components=1 -xJf /tmp/node-v22.22.3-linux-x64.tar.xz && \
-    rm /tmp/node-v22.22.3-linux-x64.tar.xz
+RUN tar -C /usr/local --strip-components=1 -xJf /tmp/node-v22.22.3-linux-x64.tar.xz && rm /tmp/node-v22.22.3-linux-x64.tar.xz
 
-ENV NODE_PATH=/usr/local/lib/node_modules \
-    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+ENV NODE_PATH=/usr/local/lib/node_modules NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
-
-RUN node -v && npm -v && npm config get registry
+RUN node -v && npm -v
 DOCKERFILE_NODE
 
 docker build --progress=plain --no-cache -t node:22.22.3 -f /tmp/Dockerfile.node /tmp
@@ -215,16 +394,18 @@ if [ -f "${_SCRIPT_DIR}/harbor.zip" ]; then
     fi
     rm -rf /tmp/harbor_extract
     [ -f "${BUILD_DIR}/Makefile" ] || err "harbor.zip 解压异常，未找到 Makefile"
-    # 修复 Windows zip 打包带来的 CRLF + 权限问题
-    find "${BUILD_DIR}" -type f -name '*.sh' -exec sed -i 's/\r$//' {} \; 2>/dev/null || true
+    # 修复 Windows zip 打包带来的 CRLF 问题（覆盖所有文本/脚本文件）
+    # Harbor make/photon/*/builder 无 .sh 后缀也需修复
+    find "${BUILD_DIR}" -type f \
+        ! -name '*.tar' ! -name '*.gz' ! -name '*.xz' ! -name '*.zip' \
+        ! -name '*.png' ! -name '*.ico' ! -name '*.svg' ! -name '*.woff*' \
+        ! -name '*.ttf' ! -name '*.eot' ! -name '*.jar' ! -name '*.war' \
+        -exec sh -c 'for f; do tr -d "\r" < "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done' _ {} + 2>/dev/null || true
     chmod -R +x "${BUILD_DIR}/make/" 2>/dev/null || true
-    # Photon → CentOS 兼容修复（全部 Dockerfile 生效）
-    find "${BUILD_DIR}" -name 'Dockerfile*' -exec sed -i \
-        -e 's|tdnf |dnf |g' \
-        -e '/photon-snapshot.repo/d' \
-        -e 's|groupadd -g 999 |groupadd -f -g 999 |g' \
-        -e 's|groupadd -r -g 10000 |groupadd -f -r -g 10000 |g' \
-        {} \; 2>/dev/null || true
+    # ── Photon → CentOS: 扫描 + 修复 + 验证 ──
+    _apply_photon_fixes "${BUILD_DIR}"
+    # 删除损坏的 .git（harbor.zip 中 git 对象文件已损坏，留着影响 Docker build）
+    rm -rf "${BUILD_DIR}/.git" 2>/dev/null || true
     info "  解压完成: ${BUILD_DIR}"
 elif [ -d "${BUILD_DIR}/.git" ]; then
     cd "${BUILD_DIR}"
@@ -249,28 +430,22 @@ fi
 [ -d "${BUILD_DIR}" ] || err "BUILD_DIR 不存在: ${BUILD_DIR}"
 cd "${BUILD_DIR}"
 [ -f Makefile ] || err "Makefile 缺失，源码不完整"
-# Photon → CentOS 兼容修复
-find "${BUILD_DIR}" -name 'Dockerfile*' -exec sed -i \
-    -e 's|tdnf |dnf |g' \
-    -e '/photon-snapshot.repo/d' \
-    -e 's|groupadd -g 999 |groupadd -f -g 999 |g' \
-    -e 's|groupadd -r -g 10000 |groupadd -f -r -g 10000 |g' \
-    {} \; 2>/dev/null || true
 
-# ---- 4. 编译 Go 二进制 ----
-step "[4/9] 编译 Go 二进制..."
-go env GOPATH GOPROXY GOROOT 2>/dev/null || true
-make compile VERSIONTAG="v${HARBOR_VER}" GOFLAGS="-mod=mod" -j$(nproc) \
-    || err "编译失败（检查: 能否访问 goproxy.cn? vendor 目录是否缺失?）"
+# 修复可能存在的 Windows CRLF 行尾（git clone 也可能带入）
+find "${BUILD_DIR}" -type f \
+    ! -name '*.tar' ! -name '*.gz' ! -name '*.xz' ! -name '*.zip' \
+    ! -name '*.png' ! -name '*.ico' ! -name '*.svg' ! -name '*.woff*' \
+    ! -name '*.ttf' ! -name '*.eot' ! -name '*.jar' ! -name '*.war' \
+    -exec sh -c 'for f; do tr -d "\r" < "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done' _ {} + 2>/dev/null || true
+chmod -R +x "${BUILD_DIR}/make/" 2>/dev/null || true
 
-# ---- 5. 构建镜像 ----
-step "[5/9] 构建 Docker 镜像..."
+_apply_photon_fixes "${BUILD_DIR}"
 
-# 禁止 BuildKit 从 Registry 拉取基础镜像，强制使用本地
-export BUILDKIT_NO_PULL=1
-
-# 预构建 spectral 镜像（如本地有 binary 则跳过下载）
-if [ -f "${_SCRIPT_DIR}/spectral-linux-x64" ] && ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^goharbor/spectral:v6.14.2$'; then
+# ---- 3-b. 预构建 spectral 镜像（解决 GitHub 下载极易中断的问题）----
+# 必须在 make compile 之前执行，因为 Harbor 2.11 的 make compile 依赖 lint_apis，
+# 而 lint_apis 会触发 Docker build 从 GitHub 下载 spectral（85MB），极易因网络中断失败。
+step "[3-b/9] 预构建 spectral 镜像（防止 GitHub 下载中断）..."
+if [ -f "${_SCRIPT_DIR}/spectral-linux-x64" ]; then
     info "  使用本地 spectral-linux-x64 构建镜像..."
     cp "${_SCRIPT_DIR}/spectral-linux-x64" /tmp/
     chmod +x /tmp/spectral-linux-x64
@@ -281,7 +456,50 @@ RUN chmod +x /usr/bin/spectral && spectral --version
 DOCKERFILE_SPECTRAL
     rm -f /tmp/spectral-linux-x64
     info "  ✓ goharbor/spectral:v6.14.2"
+
+    # 替换 Harbor 源码中的 spectral Dockerfile，防止 make lint_apis 二次从 GitHub 下载
+    # Harbor 可能有多处 spectral Dockerfile，全部修补为引用预构建镜像
+    SPECTRAL_FILES=$(find "${BUILD_DIR}" -path '*/spectral/Dockerfile*' -type f 2>/dev/null || true)
+    if [ -n "${SPECTRAL_FILES}" ]; then
+        while IFS= read -r sf; do
+            [ -n "${sf}" ] || continue
+            info "  修补 spectral Dockerfile: ${sf#${BUILD_DIR}/}"
+            cat > "${sf}" << 'SPECTRAL_NOOP'
+ARG NODE
+ARG SPECTRAL_VERSION
+FROM goharbor/spectral:v6.14.2
+SPECTRAL_NOOP
+        done <<< "${SPECTRAL_FILES}"
+    else
+        warn "  未找到 spectral Dockerfile，lint_apis 可能仍会从 GitHub 下载"
+    fi
+else
+    warn "  本地 spectral-linux-x64 缺失，尝试修补 Dockerfile 添加重试/换源..."
+    # 兜底：修补 spectral Dockerfile 添加 wget 重试 + 代理备选
+    SPECTRAL_FILES=$(find "${BUILD_DIR}" -path '*/spectral/Dockerfile*' -type f 2>/dev/null || true)
+    if [ -n "${SPECTRAL_FILES}" ]; then
+        while IFS= read -r sf; do
+            [ -n "${sf}" ] || continue
+            info "  修补 spectral Dockerfile: ${sf#${BUILD_DIR}/}"
+            sed -i 's|curl -fsSL -o /usr/bin/spectral $URL|curl -fsSL --retry 5 --retry-delay 10 --retry-max-time 300 -o /usr/bin/spectral $URL|g' "${sf}"
+        done <<< "${SPECTRAL_FILES}"
+        warn "  已添加重试，但 GitHub 下载仍可能失败"
+    fi
 fi
+
+# ---- 4. 编译 Go 二进制 ----
+step "[4/9] 编译 Go 二进制..."
+go env GOPATH GOPROXY GOROOT 2>/dev/null || true
+make compile VERSIONTAG="v${HARBOR_VER}" GOFLAGS="-mod=mod -buildvcs=false" -j$(nproc) \
+    || err "编译失败（检查: 能否访问 goproxy.cn? vendor 目录是否缺失?）"
+
+# ---- 5. 构建镜像 ----
+step "[5/9] 构建 Docker 镜像..."
+
+# 禁止 BuildKit 从 Registry 拉取基础镜像，强制使用本地
+export BUILDKIT_NO_PULL=1
+
+# （spectral 镜像预构建已提升至步骤[3-b/9]，此处不再重复）
 
 # 强制所有 docker build 加 --pull=false，禁止从 Docker Hub 拉取
 find "${BUILD_DIR}" -name 'Makefile' -exec sed -i \
@@ -290,14 +508,67 @@ find "${BUILD_DIR}" -name 'Makefile' -exec sed -i \
     {} \; 2>/dev/null || true
 info "  已禁用 docker pull"
 
+# ── 清理上次失败残留（确保修复后的 Dockerfile 被重新构建）──
+# 如果基础镜像因上次 postgresql15-server 错误而构建失败，
+# Docker 可能保留了半成品镜像 → 删除它们，强制重建
+step "[5-b/9] 清理上次失败残留..."
+_cleaned=0
+for stale in \
+    goharbor/harbor-db-base:v2.11.0 \
+    goharbor/harbor-db:v2.11.0 \
+; do
+    if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${stale}$"; then
+        if docker rmi -f "${stale}" 2>/dev/null; then
+            info "  已删除: ${stale}"
+            _cleaned=$((_cleaned + 1))
+        fi
+    fi
+done
+# 清理悬空镜像（中间层 <none>:<none>）
+docker image prune -f 2>/dev/null || true
+# 清理 BuildKit 缓存（防止引用旧的 Dockerfile 内容哈希）
+docker builder prune -f 2>/dev/null || true
+[ ${_cleaned} -gt 0 ] && info "  已清理 ${_cleaned} 个旧镜像，将重新构建" || info "  ✓ 无残留"
+
 # 优先本地 tar 加载外部依赖镜像（否则 make build 会尝试拉取）
 for tar_img in "valkey-9-alpine.tar" "registry-2.tar" "postgres-15-alpine.tar"; do
     load_local_image "${tar_img}" || true
 done
 
+# ── 构建前终验：确保不再有 postgresql15/18 ──
+# 如果这里仍打印出 postgresql15-server，说明上面的 _apply_photon_fixes 未生效
+# 或 make compile 覆盖了文件（极端情况）
+step "[5-c/9] 构建前终验..."
+_PG_BAD=$(grep -rnE 'postgresql(15|18)-server' "${BUILD_DIR}" --include='Dockerfile*' 2>/dev/null || true)
+if [ -n "${_PG_BAD}" ]; then
+    warn "  ❌ 构建前发现残留 postgresql15/18-server:"
+    echo "${_PG_BAD}" | while IFS= read -r line; do warn "    ${line}"; done
+    info "  正在紧急修复..."
+    find "${BUILD_DIR}" -name 'Dockerfile*' -type f -exec sed -i \
+        -e 's/postgresql18-server/postgresql-server/g' \
+        -e 's/postgresql15-server/postgresql-server/g' \
+        -e 's/postgresql18-contrib/postgresql-contrib/g' \
+        -e 's/postgresql15-contrib/postgresql-contrib/g' \
+        -e 's|/usr/pgsql/18/share/postgresql/|/usr/share/postgresql/|g' \
+            -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
+        -e 's|/usr/pgsql/15/share/postgresql/|/usr/share/postgresql/|g' \
+            -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
+        {} \;
+    _PG_BAD2=$(grep -rnE 'postgresql(15|18)-server' "${BUILD_DIR}" --include='Dockerfile*' 2>/dev/null || true)
+    if [ -n "${_PG_BAD2}" ]; then
+        warn "  ❌ 紧急修复后仍有残留:"
+        echo "${_PG_BAD2}" | while IFS= read -r line; do warn "    ${line}"; done
+        err "无法修复 Dockerfile 中的 postgresql15/18，请手动检查"
+    fi
+    info "  ✓ 紧急修复完成"
+else
+    info "  ✓ 无 postgresql15/18-server 残留"
+fi
+
 make build VERSIONTAG="v${HARBOR_VER}" \
     BASEIMAGETAG="v${HARBOR_VER}" \
     PULL_BASE_FROM_DOCKERHUB="false" \
+    NPM_REGISTRY=https://registry.npmmirror.com \
     || err "镜像构建失败"
 
 # ---- 6. 打标签 ----
@@ -358,7 +629,7 @@ go clean -cache -modcache 2>/dev/null || true
 info "  ✓ 清理完成"
 
 # ---- 9. 完成 ----
-step "[9/9] 完成"
+step "[10/10] 完成"
 echo ""
 echo "============================================"
 echo "  Harbor ${HARBOR_VER} 构建完成"

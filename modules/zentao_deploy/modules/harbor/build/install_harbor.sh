@@ -56,6 +56,9 @@ else
     chmod 644 /data/secret/cert/server.crt /data/secret/cert/server.key
     info "  已生成"
 fi
+# 修复 DB 数据目录权限（PostgreSQL 容器 UID=999 需写权限）
+mkdir -p "${DATA_DIR}/database" /data/registry
+chmod 777 "${DATA_DIR}/database" 2>/dev/null || true
 
 # ---- 2. 配置 harbor.yml ----
 step "[2/7] 配置 harbor.yml..."
