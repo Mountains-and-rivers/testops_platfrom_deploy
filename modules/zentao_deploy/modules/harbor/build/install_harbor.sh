@@ -34,7 +34,15 @@ step "[0/7] 环境检查..."
 FAILED=0
 command -v docker &>/dev/null && info "  Docker" || { warn "  Docker 未安装"; FAILED=1; }
 systemctl is-active docker &>/dev/null || { systemctl start docker; systemctl enable docker; }
-docker compose version &>/dev/null && info "  Docker Compose" || { warn "  Docker Compose"; FAILED=1; }
+if docker compose version &>/dev/null; then
+    DOCKER_COMPOSE="docker compose"
+    info "  Docker Compose"
+elif docker-compose version &>/dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+    info "  Docker Compose (独立版)"
+else
+    warn "  Docker Compose"; FAILED=1
+fi
 docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${REGISTRY}/harbor-core:${HARBOR_VER}" \
     && info "  本地镜像 ${REGISTRY}/harbor-core:${HARBOR_VER}" \
     || { warn "  本地镜像不存在，请先执行 build_local.sh"; FAILED=1; }
@@ -64,7 +72,9 @@ chmod 777 "${DATA_DIR}/database" 2>/dev/null || true
 step "[2/7] 配置 harbor.yml..."
 [ -d "${INSTALL_DIR}" ] && warn "  ${INSTALL_DIR} 已存在，覆盖" && rm -rf "${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
-cp "${BUILD_DIR}/make/harbor.yml.tmpl" "${INSTALL_DIR}/harbor.yml.tmpl"
+[ -f "${BUILD_DIR}/make/harbor.yml.tmpl" ] \
+    && cp "${BUILD_DIR}/make/harbor.yml.tmpl" "${INSTALL_DIR}/harbor.yml.tmpl" \
+    || err "模板文件不存在: ${BUILD_DIR}/make/harbor.yml.tmpl（请先在同一机器上执行 build_local.sh）"
 cd "${INSTALL_DIR}"
 cp harbor.yml.tmpl harbor.yml
 sed -i "s/hostname: reg.mydomain.com/hostname: ${HARBOR_DOMAIN}/" harbor.yml
@@ -96,16 +106,16 @@ if [ -f common/config/core/env ]; then
     sed -i 's|POSTGRESQL_HOST=postgresql|POSTGRESQL_HOST=harbor-db|' common/config/core/env
 fi
 # 修复镜像名称（prepare 生成 Photon 命名，替换为实际镜像名）
-sed -i 's|goharbor/registry-photon:v2.11.0|goharbor/harbor-registry:v2.11.0|g' docker-compose.yml
-sed -i 's|goharbor/valkey-photon:v2.11.0|goharbor/harbor-valkey:v2.11.0|g' docker-compose.yml
-sed -i 's|goharbor/redis-photon:v2.11.0|goharbor/harbor-valkey:v2.11.0|g' docker-compose.yml
-sed -i 's|goharbor/trivy-adapter-photon:v2.11.0|goharbor/harbor-trivy-adapter:v2.11.0|g' docker-compose.yml
+sed -i "s|goharbor/registry-photon:v${HARBOR_VER}|goharbor/harbor-registry:v${HARBOR_VER}|g" docker-compose.yml
+sed -i "s|goharbor/valkey-photon:v${HARBOR_VER}|goharbor/harbor-valkey:v${HARBOR_VER}|g" docker-compose.yml
+sed -i "s|goharbor/redis-photon:v${HARBOR_VER}|goharbor/harbor-valkey:v${HARBOR_VER}|g" docker-compose.yml
+sed -i "s|goharbor/trivy-adapter-photon:v${HARBOR_VER}|goharbor/harbor-trivy-adapter:v${HARBOR_VER}|g" docker-compose.yml
 info "  已修复"
 
 # ---- 5. 启动 ----
 step "[5/7] 启动 Harbor..."
-docker compose down 2>/dev/null || true
-docker compose up -d 2>&1 | tail -10
+${DOCKER_COMPOSE} down 2>/dev/null || true
+${DOCKER_COMPOSE} up -d 2>&1 | tail -10
 info "  已启动"
 
 # ---- 6. 等待就绪 ----
@@ -114,14 +124,14 @@ for i in $(seq 1 30); do
     if curl -sk --connect-timeout 3 "https://127.0.0.1" 2>/dev/null | grep -q 'Harbor'; then
         info "Harbor 就绪 (${i}/30)"; break
     fi
-    [ $i -eq 30 ] && warn "超时，检查: cd ${INSTALL_DIR} && docker compose ps" || sleep 5
+    [ $i -eq 30 ] && warn "超时，检查: cd ${INSTALL_DIR} && ${DOCKER_COMPOSE} ps" || sleep 5
 done
 
 # ---- 7. 验证 ----
 step "[7/7] 启动后检查..."
-docker compose ps 2>/dev/null | head -12
-RUNNING=$(docker compose ps --status running -q 2>/dev/null | wc -l)
-TOTAL=$(docker compose ps -q 2>/dev/null | wc -l)
+${DOCKER_COMPOSE} ps 2>/dev/null | head -12
+RUNNING=$(${DOCKER_COMPOSE} ps --status running -q 2>/dev/null | wc -l)
+TOTAL=$(${DOCKER_COMPOSE} ps -q 2>/dev/null | wc -l)
 [ ${TOTAL} -gt 0 ] && info "  容器: ${RUNNING}/${TOTAL} running"
 HTTP_CODE=$(curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 5 "https://127.0.0.1" 2>/dev/null || echo "000")
 case "${HTTP_CODE}" in

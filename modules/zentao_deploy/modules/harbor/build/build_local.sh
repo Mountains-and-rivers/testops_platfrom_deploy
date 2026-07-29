@@ -89,6 +89,7 @@ _apply_photon_fixes() {
             -e 's|useradd -m -r -g postgres --uid=999 postgres|useradd -m -r -g postgres postgres|g' \
             -e 's|useradd -u 999 -g 999 |useradd -r -g 999 |g' \
             -e 's|useradd -r -c "Valkey|useradd -r -g 999 -c "Valkey|g' \
+            -e '/\/usr\/pgsql\//d' \
             "${f}"
 
         # 验证：sed 后不能还有 postgresql15/18-server
@@ -106,6 +107,7 @@ _apply_photon_fixes() {
                 -e 's|/usr/pgsql/15/share/postgresql/|/usr/share/postgresql/|g' \
             -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
                 -e 's|tdnf |dnf |g' \
+                -e '/\/usr\/pgsql\//d' \
                 > "${f}.fix" && mv "${f}.fix" "${f}"
             if grep -qE 'postgresql(15|18)-server' "${f}" 2>/dev/null; then
                 warn "    ❌ 仍无法修复，保留备份 ${f}.bak"
@@ -138,6 +140,30 @@ _apply_photon_fixes() {
             sed -i 's|dnf install photon-repos -y|dnf install -y epel-release|' "${cdf}"
         fi
     fi
+
+    # prepare/Dockerfile.base: python3-click（CentOS 需要，Photon 自带）
+    # + httpd-tools 替代 rpm2cpio 解包 htpasswd
+    local pdf="${src_dir}/make/photon/prepare/Dockerfile.base"
+    if [ -f "${pdf}" ]; then
+        if grep -q 'python3-jinja2' "${pdf}" 2>/dev/null && ! grep -q 'python3-click' "${pdf}" 2>/dev/null; then
+            sed -i 's|python3-jinja2|python3-jinja2 python3-click|' "${pdf}"
+            info "    ✓ prepare/Dockerfile.base: +python3-click"
+        fi
+        if grep -q 'cpio -ivdm.*htpasswd' "${pdf}" 2>/dev/null; then
+            sed -i '/rpm cpio apr-util/d' "${pdf}"
+            sed -i 's|RUN dnf -y --downloadonly.*htpasswd && rm -f /tmp/\*|RUN dnf --disablerepo=centosplus --disablerepo=PowerTools install -y httpd-tools \&\& dnf clean all|' "${pdf}"
+            info "    ✓ prepare/Dockerfile.base: httpd-tools 替代 rpm2cpio"
+        fi
+    fi
+
+    # log/Dockerfile.base: net-tools（健康检查 netstat -ltun 需要）
+    local ldf="${src_dir}/make/photon/log/Dockerfile.base"
+    if [ -f "${ldf}" ]; then
+        if grep -q 'cronie rsyslog' "${ldf}" 2>/dev/null && ! grep -q 'net-tools' "${ldf}" 2>/dev/null; then
+            sed -i 's|cronie rsyslog|cronie rsyslog net-tools|' "${ldf}"
+            info "    ✓ log/Dockerfile.base: +net-tools"
+        fi
+    fi
 }
 
 echo "============================================"
@@ -164,10 +190,22 @@ command -v git  &>/dev/null && info "  ✓ Git $(git --version 2>&1 | awk '{prin
 command -v make &>/dev/null && info "  ✓ Make $(make --version 2>&1 | head -1)" \
     || { dnf install -y make 2>/dev/null || { warn "  ✗ Make"; FAILED=1; }; }
 
+command -v unzip &>/dev/null && info "  ✓ unzip" \
+    || { dnf install -y unzip 2>/dev/null || { warn "  ✗ unzip"; FAILED=1; }; }
+
+command -v expect &>/dev/null && info "  ✓ expect" \
+    || { dnf install -y expect 2>/dev/null || warn "  expect 未安装（git clone 路径需要）"; }
+
 # Go — 优先用预编译二进制，没有则下载官方包
 if [ -x "${GO_BIN}" ]; then
     info "  ✓ Go $(${GO_BIN} version 2>&1 | awk '{print $3}') (${GO_DIR})"
     export PATH="${GO_DIR}/bin:${PATH}"
+    # 预装 Go 也需配置代理（否则默认 proxy.golang.org 在国内不可达）
+    export GOPROXY=https://goproxy.cn,direct
+    export GO111MODULE=on
+    export GONOSUMCHECK=*
+    export GONOSUMDB=*
+    export GONOPROXY=
 elif command -v go &>/dev/null; then
     go env -w GOPROXY=https://goproxy.cn 2>/dev/null || true
     go env -w GONOSUMCHECK=* GONOSUMDB=* GO111MODULE=on 2>/dev/null || true
@@ -191,7 +229,8 @@ else
         for i in 1 2 3; do
             info "  Go 下载 (${i}/3): https://go.dev/dl/${GO_TGZ}"
             wget -q --show-progress -O "/tmp/${GO_TGZ}" "https://go.dev/dl/${GO_TGZ}" 2>/dev/null || \
-                curl -L -o "/tmp/${GO_TGZ}" "https://go.dev/dl/${GO_TGZ}" || true
+                wget -q --show-progress -O "/tmp/${GO_TGZ}" "https://golang.google.cn/dl/${GO_TGZ}" 2>/dev/null || \
+                curl -L -o "/tmp/${GO_TGZ}" "https://golang.google.cn/dl/${GO_TGZ}" || true
             if tar -tzf "/tmp/${GO_TGZ}" >/dev/null 2>&1; then
                 _found=true; break
             fi
@@ -204,6 +243,7 @@ else
         export PATH="${GO_DIR}/bin:${PATH}"
         go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
         go env -w GO111MODULE=on 2>/dev/null || true
+        go env -w GONOSUMCHECK=* GONOSUMDB=* GONOPROXY= 2>/dev/null || true
         info "  ✓ Go $(go version 2>&1 | awk '{print $3}') (${GO_DIR})"
     else
         warn "  ✗ Go 下载失败"; FAILED=1
@@ -232,12 +272,6 @@ else
     fi
 fi
 
-# 确保 photon 标签也存在
-if ! docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${PHOTON_IMAGE}$"; then
-    info "  补充 Photon 标签: ${PHOTON_IMAGE}"
-    docker tag "${PHOTON_IMAGE}" "${PHOTON_IMAGE}"
-fi
-
 # ---- 1. 构建 golang:1.26.4（FROM centos:stream9 + 编译工具 + Go）----
 step "[1/9] 构建 golang:1.26.4 (基于 centos:stream9)..."
 docker rmi -f golang:1.26.4 2>/dev/null || true
@@ -257,7 +291,8 @@ if ! ${_found}; then
     for i in 1 2 3; do
         info "  Go 下载 (${i}/3): https://go.dev/dl/${GO_ARCHIVE}"
         wget -q --show-progress -O "/tmp/${GO_ARCHIVE}" "https://go.dev/dl/${GO_ARCHIVE}" 2>/dev/null || \
-            curl -L -o "/tmp/${GO_ARCHIVE}" "https://go.dev/dl/${GO_ARCHIVE}" || true
+            wget -q --show-progress -O "/tmp/${GO_ARCHIVE}" "https://golang.google.cn/dl/${GO_ARCHIVE}" 2>/dev/null || \
+            curl -L -o "/tmp/${GO_ARCHIVE}" "https://golang.google.cn/dl/${GO_ARCHIVE}" || true
         if tar -tzf "/tmp/${GO_ARCHIVE}" >/dev/null 2>&1; then _found=true; break; fi
         warn "  Go 校验失败 (${i}/3)"; rm -f "/tmp/${GO_ARCHIVE}"; sleep 5
     done
@@ -329,7 +364,8 @@ if ! ${_found}; then
     for i in 1 2 3; do
         info "  Node 下载 (${i}/3): https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}"
         wget -q --show-progress -O "/tmp/${NODE_ARCHIVE}" "https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}" 2>/dev/null || \
-            curl -L -o "/tmp/${NODE_ARCHIVE}" "https://nodejs.org/dist/v22.22.3/${NODE_ARCHIVE}" || true
+            wget -q --show-progress -O "/tmp/${NODE_ARCHIVE}" "https://npmmirror.com/mirrors/node/v22.22.3/${NODE_ARCHIVE}" 2>/dev/null || \
+            curl -L -o "/tmp/${NODE_ARCHIVE}" "https://npmmirror.com/mirrors/node/v22.22.3/${NODE_ARCHIVE}" || true
         if tar -tJf "/tmp/${NODE_ARCHIVE}" >/dev/null 2>&1; then _found=true; break; fi
         warn "  Node 校验失败 (${i}/3)"; rm -f "/tmp/${NODE_ARCHIVE}"; sleep 5
     done
@@ -453,6 +489,7 @@ if [ -f "${_SCRIPT_DIR}/spectral-linux-x64" ]; then
 FROM node:22.22.3
 COPY spectral-linux-x64 /usr/bin/spectral
 RUN chmod +x /usr/bin/spectral && spectral --version
+ENTRYPOINT ["/usr/bin/spectral"]
 DOCKERFILE_SPECTRAL
     rm -f /tmp/spectral-linux-x64
     info "  ✓ goharbor/spectral:v6.14.2"
@@ -490,6 +527,9 @@ fi
 # ---- 4. 编译 Go 二进制 ----
 step "[4/9] 编译 Go 二进制..."
 go env GOPATH GOPROXY GOROOT 2>/dev/null || true
+cd "${BUILD_DIR}"
+
+# make compile 内部已包含 go mod tidy + 代码生成，直接编译即可
 make compile VERSIONTAG="v${HARBOR_VER}" GOFLAGS="-mod=mod -buildvcs=false" -j$(nproc) \
     || err "编译失败（检查: 能否访问 goproxy.cn? vendor 目录是否缺失?）"
 
@@ -514,8 +554,8 @@ info "  已禁用 docker pull"
 step "[5-b/9] 清理上次失败残留..."
 _cleaned=0
 for stale in \
-    goharbor/harbor-db-base:v2.11.0 \
-    goharbor/harbor-db:v2.11.0 \
+    "goharbor/harbor-db-base:v${HARBOR_VER}" \
+    "goharbor/harbor-db:v${HARBOR_VER}" \
 ; do
     if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${stale}$"; then
         if docker rmi -f "${stale}" 2>/dev/null; then
@@ -535,6 +575,28 @@ for tar_img in "valkey-9-alpine.tar" "registry-2.tar" "postgres-15-alpine.tar"; 
     load_local_image "${tar_img}" || true
 done
 
+# registry:2 已加载 → 打为 Harbor 标签，跳过 Makefile 中从 GitHub 克隆的 _build_registry
+if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^registry:2$'; then
+    info "  registry:2 已加载，跳过 _build_registry（避免 GitHub 克隆）"
+    docker tag registry:2 "goharbor/harbor-registry:v${HARBOR_VER}"
+    # 将 _build_registry 目标改为空操作
+    find "${BUILD_DIR}" -name 'Makefile' -exec sed -i \
+        's|^_build_registry:.*|_build_registry: ; @true|' {} \; 2>/dev/null || true
+fi
+
+# 禁用有问题的 yum 源（阿里云镜像对 centosplus/PowerTools/CRB 经常 404/超时）
+# Harbor Dockerfile.base 中 sed -i 's/^enabled.../enabled=1/' 会启用全部源，导致 dnf 超时
+# 方案：在 Dockerfile 中 "enable all" 那行之后插入删除问题源文件的命令
+info "  禁用有问题的 yum 源（centosplus/PowerTools/CRB）..."
+find "${BUILD_DIR}" -name 'Dockerfile*' -type f -exec sed -i \
+    -e 's|/etc/yum.repos.d/\*\.repo|/etc/yum.repos.d/*.repo \&\& rm -f /etc/yum.repos.d/*centosplus* /etc/yum.repos.d/*PowerTools* /etc/yum.repos.d/*CRB* /etc/yum.repos.d/*plus* /etc/yum.repos.d/*rt* /etc/yum.repos.d/*nfv* /etc/yum.repos.d/*ha* 2>/dev/null \|\| true|g' \
+    {} \;
+# 同时给所有 dnf 命令加 --disablerepo 兜底
+find "${BUILD_DIR}" -name 'Dockerfile*' -type f -exec sed -i \
+    -e 's|dnf makecache|dnf --disablerepo=centosplus --disablerepo=PowerTools makecache|g' \
+    -e 's|dnf install |dnf --disablerepo=centosplus --disablerepo=PowerTools install |g' \
+    {} \;
+
 # ── 构建前终验：确保不再有 postgresql15/18 ──
 # 如果这里仍打印出 postgresql15-server，说明上面的 _apply_photon_fixes 未生效
 # 或 make compile 覆盖了文件（极端情况）
@@ -553,6 +615,7 @@ if [ -n "${_PG_BAD}" ]; then
             -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
         -e 's|/usr/pgsql/15/share/postgresql/|/usr/share/postgresql/|g' \
             -e 's|\(/usr/share/postgresql/postgresql.conf.sample\)|\1 \|\| true|g' \
+            -e '/\/usr\/pgsql\//d' \
         {} \;
     _PG_BAD2=$(grep -rnE 'postgresql(15|18)-server' "${BUILD_DIR}" --include='Dockerfile*' 2>/dev/null || true)
     if [ -n "${_PG_BAD2}" ]; then
@@ -594,7 +657,7 @@ fi
 
 # ---- 8. 修复 prepare 镜像（htpasswd 缺失导致无法生成配置）----
 step "[8/9] 修复 prepare 镜像..."
-if docker images --format '{{.Tag}}' goharbor/prepare:v2.11.0 2>/dev/null | grep -q .; then
+if docker images --format '{{.Tag}}' "goharbor/prepare:v${HARBOR_VER}" 2>/dev/null | grep -q .; then
     info "  安装 htpasswd 到 prepare 镜像..."
     cat > /tmp/htpasswd.py << 'PYEOF'
 import sys,hashlib,base64
@@ -603,12 +666,19 @@ h=base64.b64encode(hashlib.sha256(p.encode()).digest()).decode()
 open(f,"w").write(u+":"+h+"\n")
 PYEOF
     docker rm -f prepare-fix 2>/dev/null || true
-    docker run -d --name prepare-fix --entrypoint sleep goharbor/prepare:v2.11.0 300
-    sleep 2
+    docker run -d --name prepare-fix --entrypoint sleep "goharbor/prepare:v${HARBOR_VER}" 300
+    # 轮询等待容器进入 running 状态（sleep 2 不可靠，Docker 启动可能 >2s）
+    for i in $(seq 1 30); do
+        if docker inspect -f '{{.State.Running}}' prepare-fix 2>/dev/null | grep -q true; then
+            break
+        fi
+        [ $i -eq 30 ] && warn "prepare-fix 容器启动超时，继续尝试..."
+        sleep 1
+    done
     docker cp /tmp/htpasswd.py prepare-fix:/usr/local/bin/htpasswd
     docker exec prepare-fix chmod 755 /usr/local/bin/htpasswd
     docker exec prepare-fix sed -i 's|/usr/bin/htpasswd|/usr/local/bin/htpasswd|g' /usr/src/app/utils/registry.py
-    docker commit prepare-fix goharbor/prepare:v2.11.0
+    docker commit prepare-fix "goharbor/prepare:v${HARBOR_VER}"
     docker rm -f prepare-fix 2>/dev/null || true
     rm -f /tmp/htpasswd.py
     info "  prepare 已修复"

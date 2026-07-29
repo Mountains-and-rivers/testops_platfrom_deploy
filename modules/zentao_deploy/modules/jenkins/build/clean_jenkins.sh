@@ -8,18 +8,19 @@
 # ============================================================
 set -euo pipefail; cd /tmp
 
-# ── 路径定义 ────────────────────────────────────────────
+# ── 路径定义（与 build_jenkins.sh / install_jenkins.sh 保持一致）──
 JENKINS_WAR="${JENKINS_WAR:-/opt/jenkins/jenkins.war}"
-JENKINS_DIR="${JENKINS_DIR:-/opt/jenkins}"
+JENKINS_DIR="$(dirname "${JENKINS_WAR}")"                                # /opt/jenkins
 JENKINS_HOME="${JENKINS_HOME:-/var/lib/jenkins}"
 JENKINS_LOG_DIR="${JENKINS_LOG_DIR:-/var/log/jenkins}"
 JENKINS_RUN_DIR="${JENKINS_RUN_DIR:-/run/jenkins}"
 JENKINS_PORT="${JENKINS_PORT:-8080}"
 AGENT_PORT="${AGENT_PORT:-50000}"
 JENKINS_USER="${JENKINS_USER:-jenkins}"
-BUILD_DIR="${BUILD_DIR:-/opt/build/jenkins}"
+BUILD_DIR="${BUILD_DIR:-/opt/build/jenkins}"                             # 源码+产物+Maven本地仓库
 MAVEN_HOME="${MAVEN_HOME:-/opt/maven}"
-JAVA_HOME_TARGET="${JAVA_HOME_TARGET:-/opt/jdk17}"
+CACHE_DIR="${CACHE_DIR:-/tmp/build-cache}"                               # 离线包缓存
+# JDK 路径可能为 /opt/jdk11 /opt/jdk17 /opt/jdk21（取决于 Jenkins 版本）
 
 # ── UI ──────────────────────────────────────────────────
 readonly R='\033[0;31m' G='\033[0;32m' Y='\033[1;33m' C='\033[0;36m' N='\033[0m'
@@ -100,17 +101,28 @@ _clean_service() {
 
 _clean_build() {
     step "构建产物..."
-    _safe "${BUILD_DIR}" && rm -rf "${BUILD_DIR}" && _ok "${BUILD_DIR}" || _skip "${BUILD_DIR}"
+    # ${BUILD_DIR} 包含: source/（源码）、.m2/（Maven本地仓库+Node缓存）、maven_build.log
+    _safe "${BUILD_DIR}" && rm -rf "${BUILD_DIR}" && _ok "${BUILD_DIR} (源码+Maven仓库+Node缓存)" || _skip "${BUILD_DIR}"
+    # 清理可能由 mvn 直接写入的用户级 .m2（尽管 build 脚本使用 -Dmaven.repo.local）
     for d in ~/.m2 /root/.m2 "${JENKINS_HOME}/.m2"; do [ -d "${d}" ] && rm -rf "${d}" && _ok "${d}"; done
     _safe "${MAVEN_HOME}" && [ -d "${MAVEN_HOME}" ] && rm -rf "${MAVEN_HOME}" && _ok "${MAVEN_HOME}"
 }
 
 _clean_cache() {
     step "缓存..."
+    # 与 build_jenkins.sh _download() 的 CACHE_DIR 对应
+    _safe "${CACHE_DIR}" && rm -rf "${CACHE_DIR}" && _ok "${CACHE_DIR}" || _skip "${CACHE_DIR}"
+    # /tmp 下的零散下载包
     rm -f /tmp/jdk*.tar.gz /tmp/apache-maven-*.tar.gz /tmp/jenkins-*.zip /tmp/node-v*.tar.gz /tmp/yarn-v*.tar.gz 2>/dev/null || true
-    rm -f /tmp/build-cache/jdk*.tar.gz /tmp/build-cache/apache-maven-*.tar.gz /tmp/build-cache/jenkins-*.zip /tmp/build-cache/node-v*.tar.gz /tmp/build-cache/yarn-v*.tar.gz 2>/dev/null || true
     rm -rf /tmp/jdk*_extract /tmp/maven_extract /tmp/jenkins_extract /tmp/maven-build 2>/dev/null || true
-    _ok "/tmp/build-cache"
+    # Maven 本地仓库中的 Node 缓存（若 BUILD_DIR 未被清理时仍有残留）
+    if [ -d "${BUILD_DIR}/.m2/com/github/eirslett/node" ]; then
+        rm -rf "${BUILD_DIR}/.m2/com/github/eirslett/node" && _ok "Node Maven 缓存"
+    fi
+    # Maven 本地仓库中的 JDK 缓存（download 方式安装的可能残留）
+    for _jdk_cache in "${BUILD_DIR}/.m2/org/adoptium" "${BUILD_DIR}/.m2/net/java/openjdk"; do
+        [ -d "${_jdk_cache}" ] && rm -rf "${_jdk_cache}" && _ok "$(basename "${_jdk_cache}") Maven 缓存"
+    done
 }
 
 _clean_user() {
@@ -128,10 +140,12 @@ _clean_user() {
 _clean_jdk_maven() {
     step "JDK/Maven..."
     _safe "${MAVEN_HOME}" && [ -d "${MAVEN_HOME}" ] && rm -rf "${MAVEN_HOME}" && _ok "${MAVEN_HOME}"
+    # build_jenkins.sh 根据 Jenkins 版本自动选择: jdk11 / jdk17 / jdk21
     for d in /opt/jdk* /opt/java* /opt/openjdk*; do
         [ -d "${d}" ] && _safe "${d}" && rm -rf "${d}" && _ok "${d}"
     done
     rm -f /etc/profile.d/jenkins_java.sh 2>/dev/null || true
+    # Maven 用户级本地仓库（构建脚本使用 -Dmaven.repo.local，此处清理作为兜底）
     for d in ~/.m2 /root/.m2; do [ -d "${d}" ] && rm -rf "${d}" && _ok "${d}"; done
 }
 

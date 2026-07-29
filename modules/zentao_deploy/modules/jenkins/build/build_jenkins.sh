@@ -284,12 +284,23 @@ catch wait result; exit [lindex \$result 3]" 2>&1
     [ -f "${SRC_DIR}/pom.xml" ] || die "源码获取失败，${SRC_DIR}/pom.xml 不存在"
     rm -rf "${SRC_DIR}/.git" "${SRC_DIR}/.github" 2>/dev/null || true
 
+    # 移除 test 模块（集成测试，需要 maven-hpi-plugin 等 Jenkins 私有插件，编译 WAR 不需要）
+    if [ -d "${SRC_DIR}/test" ]; then
+        rm -rf "${SRC_DIR}/test"
+        sed -i 's/<module>test<\/module>//g' "${SRC_DIR}/pom.xml"
+        info "  已移除 test 模块（避免 maven-hpi-plugin 解析失败）"
+    fi
+
     # 修复 Windows CRLF（zip 打包可能带入）
     find "${SRC_DIR}" -type f ! -name '*.jar' ! -name '*.gz' ! -name '*.zip' -exec sed -i 's/\r$//' {} \; 2>/dev/null || true
     ok "源码就绪: ${SRC_DIR}"
 }
 
 # ── Maven 编译 ──────────────────────────────────────────
+# 参考 Jenkins 官方 CONTRIBUTING.md:
+#   https://github.com/jenkinsci/jenkins/blob/master/CONTRIBUTING.md#building-the-war-file
+# 企业级最佳实践: -Pquick-build + clean install
+# Node.js: 必须提前放入 Maven 缓存（-Dskip.npm 对 install-node-and-corepack goal 无效）
 _compile() {
     step "Maven 编译 (约 10-30 分钟)..."
     cd "${SRC_DIR}"
@@ -299,76 +310,107 @@ _compile() {
     local repo="${BUILD_DIR}/.m2"; mkdir -p "${repo}"
     local log="${BUILD_DIR}/maven_build.log"
 
-    # ── Node.js 二进制包 ────────────────────────────────
-    # 策略1: 本地包优先 → 塞入 Maven 缓存，插件检测到已有则跳过下载
-    # 策略2: patch pom.xml → 把 repo.jenkins-ci.org 替换为国内镜像
-    _node_setup() {
-        local repo="$1"
-        local node_tarball="" node_ver="" node_fname="" node_fdest="" _d _f
-
-        # 1) 多目录搜索本地 node 包
-        shopt -s nullglob
-        for _d in "${SCRIPT_DIR}" "${SCRIPT_DIR}/.." "${CACHE_DIR}" "${PWD}" "${PWD}/build"; do
-            [ -d "${_d}" ] || continue
-            for _f in "${_d}/"node-v*-linux-x64.tar.gz; do
-                [ -f "${_f}" ] && [ -s "${_f}" ] || continue
-                node_tarball="${_f}"; break 2
-            done
+    # ── Node.js / frontend-maven-plugin ─────────────────
+    # frontend-maven-plugin 从 Maven 本地仓库缓存读取 node tarball:
+    #   {repo}/com/github/eirslett/node/{version}/node-{version}-linux-x64.tar.gz
+    # 把本地 node 包预填充到该路径，插件就会跳过下载，直接解压安装
+    # 有 node 包 → 预填充缓存，保留 yarn install/build，只 skip lint
+    # 无 node 包 → 全部 skip，用预编译前端资源
+    local node_tarball="" node_fname="" node_ver="" _d _f
+    shopt -s nullglob
+    for _d in "${SCRIPT_DIR}" "${SCRIPT_DIR}/.." "${CACHE_DIR}" "${PWD}" "${PWD}/build"; do
+        [ -d "${_d}" ] || continue
+        for _f in "${_d}/"node-v*-linux-x64.tar.gz; do
+            [ -f "${_f}" ] && [ -s "${_f}" ] || continue
+            node_tarball="${_f}"; break 2
         done
-        shopt -u nullglob
+    done
+    shopt -u nullglob
 
-        if [ -n "${node_tarball}" ]; then
-            # 本地包 → Maven 缓存
-            node_fname=$(basename "${node_tarball}")
-            node_ver=$(echo "${node_fname}" | sed 's/node-v\([0-9.]*\)-.*/\1/')
-            node_fdest="${repo}/com/github/eirslett/node/${node_ver}/${node_fname}"
-            if [ -f "${node_fdest}" ]; then
-                info "  Node: Maven缓存已有 ${node_fname}"
-            else
-                mkdir -p "$(dirname "${node_fdest}")"
-                cp "${node_tarball}" "${node_fdest}" && info "  Node: 本地 → Maven缓存 (${node_fname})"
-            fi
-            [ -d "${CACHE_DIR}" ] && cp "${node_tarball}" "${CACHE_DIR}/${node_fname}" 2>/dev/null || true
-        else
-            warn "  未找到本地 Node.js 包，将 patch pom.xml 使用国内镜像下载"
-        fi
+    local _pom="${SRC_DIR}/pom.xml"
 
-        # 2) 替换 Jenkins pom.xml 中的 nodeDownloadRoot 为国内镜像
-        #    原值: https://repo.jenkins-ci.org/nodejs-dist/
-        #    新值: https://npmmirror.com/mirrors/node/
-        local _pom="${SRC_DIR}/pom.xml"
-        if [ -f "${_pom}" ]; then
-            if grep -q "repo.jenkins-ci.org/nodejs-dist" "${_pom}" 2>/dev/null; then
-                sed -i 's|https://repo.jenkins-ci.org/nodejs-dist/|https://npmmirror.com/mirrors/node/|g' "${_pom}"
-                info "  Node 下载源: npmmirror.com (国内镜像)"
-            fi
-        fi
+    # 从 pom.xml 读取 frontend-maven-plugin 要求的 <nodeVersion>
+    # 支持两种写法:
+    #   1) 字面量: <nodeVersion>v24.18.0</nodeVersion>
+    #   2) 属性引用: <nodeVersion>${node.version}</nodeVersion>（需查找属性定义）
+    _pom_node_ver() {
+        local v
+        # 1) 在整个源码树搜索 <nodeVersion> 字面量
+        v=$(find "${SRC_DIR}" -maxdepth 3 -name "pom.xml" -exec sed -n 's/.*<nodeVersion>v\{0,1\}\([0-9.]*\)<\/nodeVersion>.*/\1/p' {} \; 2>/dev/null | head -1)
+        [ -n "${v}" ] && echo "${v}" && return 0
+        # 2) 查找属性定义 <node.version> 或 <git-state.node.version>
+        for _prop in "node\.version" "git-state\.node\.version"; do
+            v=$(find "${SRC_DIR}" -maxdepth 3 -name "pom.xml" -exec sed -n "s/.*<${_prop}>v\{0,1\}\([0-9.]*\)<\/${_prop}>.*/\1/p" {} \; 2>/dev/null | head -1)
+            [ -n "${v}" ] && echo "${v}" && return 0
+        done
+        return 1
     }
-    _node_setup "${repo}"
+
+    if [ -n "${node_tarball}" ] && [ -f "${_pom}" ] && grep -q 'frontend-maven-plugin' "${_pom}" 2>/dev/null; then
+        node_fname=$(basename "${node_tarball}")
+        node_ver=$(echo "${node_fname}" | sed 's/node-v\([0-9.]*\)-.*/\1/')
+        local pom_node_ver; pom_node_ver=$(_pom_node_ver || echo "")
+
+        # 版本匹配（或无法解析 pom 版本时仍尝试预填充）→ 预填充缓存
+        if [ -z "${pom_node_ver}" ] || [ "${pom_node_ver}" = "${node_ver}" ]; then
+            local node_cache_dir="${repo}/com/github/eirslett/node/${node_ver}"
+            mkdir -p "${node_cache_dir}"
+            # 缓存文件名: node-{ver}-linux-x64.tar.gz（不带 v 前缀，与插件内部命名一致）
+            cp "${node_tarball}" "${node_cache_dir}/node-${node_ver}-linux-x64.tar.gz"
+            if [ -z "${pom_node_ver}" ]; then
+                warn "  Node: 未能解析 pom nodeVersion，使用本地 v${node_ver} 预填充缓存"
+            else
+                info "  Node: v${node_ver} → Maven 本地缓存，保留 yarn install/build（只 skip lint）"
+            fi
+
+            # skip lint 类 execution（yarn lint:ci / prettier / yarn lint）
+            for _id in "yarn lint:ci" "prettier" "yarn lint"; do
+                sed -i '/<id>'"${_id}"'<\/id>/,/<\/execution>/{
+                    /<configuration>/a\              <skip>true</skip>
+                }' "${_pom}"
+            done
+        else
+            # 版本明确不匹配 → 全部 skip
+            sed -i '/<artifactId>frontend-maven-plugin<\/artifactId>/,/<\/plugin>/{
+                /<configuration>/a\              <skip>true</skip>
+            }' "${_pom}"
+            warn "  Node: 本地 v${node_ver} != pom 要求 v${pom_node_ver}，跳过全部 frontend goal（使用预编译前端资源）"
+        fi
+    elif [ -f "${_pom}" ] && grep -q 'frontend-maven-plugin' "${_pom}" 2>/dev/null; then
+        # 无 node → 全部 skip，用预编译前端资源
+        sed -i '/<artifactId>frontend-maven-plugin<\/artifactId>/,/<\/plugin>/{
+            /<configuration>/a\              <skip>true</skip>
+        }' "${_pom}"
+        warn "  Node: 未找到本地包，跳过全部 frontend goal（使用预编译前端资源）"
+    fi
+
+    # -Pquick-build   官方快速构建 profile，自动跳过 tests/spotbugs/checkstyle
+    local mvn_opts=(
+        -pl war,bom -am
+        -Pquick-build
+        -Dmaven.buildNumber.skip=true
+        -Dmaven.repo.local="${repo}"
+        -Djenkins.version="${JENKINS_VERSION}"
+        --batch-mode --no-transfer-progress
+        clean install
+    )
 
     info "  日志: ${log}"
-    info "  编译 war 模块 (跳过测试/文档/静态检查)..."
+    info "  官方: mvn -am -pl war,bom -Pquick-build clean install"
 
     # 最多重试 2 次（处理网络波动）
     local retry=0 war_file=""
     while [ ${retry} -lt 2 ]; do
-        if mvn -pl war -am package \
-            -Dmaven.repo.local="${repo}" \
-            -DskipTests -Dmaven.test.skip=true \
-            -Dmaven.javadoc.skip=true \
-            -Dspotbugs.skip=true -Dcheckstyle.skip=true \
-            -Dmaven.buildNumber.skip=true \
-            -Djenkins.version="${JENKINS_VERSION}" \
-            --batch-mode --no-transfer-progress \
-            > "${log}" 2>&1; then
+        if mvn "${mvn_opts[@]}" 2>&1 | tee "${log}"; then
             break
         fi
         retry=$((retry + 1))
         [ ${retry} -lt 2 ] && warn "  编译失败 (${retry}/2)，重试..." || { tail -60 "${log}"; die "Maven 编译失败: ${log}"; }
     done
 
-    war_file=$(find "${SRC_DIR}/war/target" -maxdepth 1 -name "jenkins.war" -type f 2>/dev/null | head -1)
-    [ -z "${war_file}" ] && war_file=$(find "${SRC_DIR}" -name "jenkins.war" -type f 2>/dev/null | head -1)
+    # 官方指定输出位置: war/target/jenkins.war
+    war_file="${SRC_DIR}/war/target/jenkins.war"
+    [ -f "${war_file}" ] || war_file=$(find "${SRC_DIR}" -name "jenkins.war" -type f 2>/dev/null | head -1)
     [ -n "${war_file}" ] && [ -f "${war_file}" ] || die "编译完成但未找到 jenkins.war"
 
     # 验证 WAR 是有效的 ZIP
