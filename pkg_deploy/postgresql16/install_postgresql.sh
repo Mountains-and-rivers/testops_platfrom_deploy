@@ -87,8 +87,12 @@ if ${ALL_LOCAL}; then
     }
     rm -f /tmp/${PG_RPM_LIBS} /tmp/${PG_RPM_CLIENT} /tmp/${PG_RPM_SERVER}
 else
-    info "  本地 RPM 不完整，尝试 dnf 在线安装..."
-    dnf install -y "https://download.postgresql.org/pub/repos/yum/${PG_MAJOR}/redhat/rhel-9-x86_64/${PG_RPM_SERVER}" 2>&1 || err "在线安装失败"
+    PG_RPM_BASE="https://download.postgresql.org/pub/repos/yum/${PG_MAJOR}/redhat/rhel-9-x86_64"
+    info "  本地 RPM 不完整，尝试 dnf 在线安装（3 个 RPM）..."
+    dnf install -y \
+        "${PG_RPM_BASE}/${PG_RPM_LIBS}" \
+        "${PG_RPM_BASE}/${PG_RPM_CLIENT}" \
+        "${PG_RPM_BASE}/${PG_RPM_SERVER}" 2>&1 || err "在线安装失败"
 fi
 
 # 验证
