@@ -108,46 +108,82 @@ uc_file = '${UC_FILE}'
 plugin_names = '${PLUGIN_NAMES}'.split(',')
 force = '${FORCE}' == 'true'
 
-# 解析 update-center.json（可能是 JSONP 格式）
+# ── 解析 update-center.json ─────────────────────────────
 versions = {}
+deps_map = {}  # plugin_name -> [dep_name1, dep_name2, ...]
+all_plugins_data = {}
+
 if os.path.exists(uc_file):
     try:
         with open(uc_file, 'r') as f:
             raw = f.read()
-        # 处理 JSONP 格式: updateCenter.post({...});
         json_str = raw
         if 'updateCenter.post(' in json_str:
             json_str = json_str.split('updateCenter.post(', 1)[1]
             if json_str.endswith(');'):
                 json_str = json_str[:-2]
         data = json.loads(json_str)
-        plugins = data.get('plugins', {})
-        for name, info in plugins.items():
+        all_plugins_data = data.get('plugins', {})
+        for name, info in all_plugins_data.items():
             versions[name] = info.get('version', 'latest')
+            # 提取非可选依赖
+            deps = info.get('dependencies', [])
+            required = []
+            for d in deps:
+                if not d.get('optional', False):
+                    required.append(d['name'])
+            deps_map[name] = required
     except Exception as e:
         print(f"  警告: 解析 update-center.json 失败: {e}")
+
+# ── 依赖解析（BFS）─────────────────────────────────────
+def resolve_dependencies(initial_plugins):
+    """返回所有需要安装的插件（含传递依赖）"""
+    to_visit = set(p.strip() for p in initial_plugins if p.strip())
+    visited = set()
+    resolved = []
+
+    while to_visit:
+        pname = to_visit.pop()
+        if pname in visited:
+            continue
+        visited.add(pname)
+
+        # 插件本体
+        if pname not in all_plugins_data:
+            print(f"  [WARN] {pname}: 不在 update-center 中，跳过")
+            continue
+
+        resolved.append(pname)
+
+        # 依赖入队
+        for dep in deps_map.get(pname, []):
+            if dep not in visited:
+                to_visit.add(dep)
+
+    return resolved
+
+# ── 解析并下载 ─────────────────────────────────────────
+initial = [p.strip() for p in plugin_names if p.strip()]
+print(f"  解析依赖关系...")
+all_needed = resolve_dependencies(initial)
+print(f"  插件总数（含依赖）: {len(all_needed)}")
 
 ok_count = 0
 skip_count = 0
 fail_count = 0
 
-for pname in plugin_names:
-    pname = pname.strip()
-    if not pname:
-        continue
-
+for pname in all_needed:
     jpi_path = os.path.join(plugin_dir, f'{pname}.jpi')
     tmp_path = os.path.join(plugin_dir, f'{pname}.jpi.tmp')
 
     # 已存在则跳过
     if os.path.exists(jpi_path) and not force:
-        print(f"  [SKIP] {pname} (已存在)")
         skip_count += 1
         continue
 
     ver = versions.get(pname, 'latest')
 
-    # 尝试指定版本下载
     url = f"{mirror_base}/{pname}/{ver}/{pname}.hpi"
     tmp_file = f"/tmp/jenkins_plugin_{pname}.hpi"
 
@@ -160,12 +196,9 @@ for pname in plugin_names:
                 capture_output=True, text=True, timeout=200
             )
             if result.stdout.strip() == '200' and os.path.exists(tmp_file) and os.path.getsize(tmp_file) > 0:
-                # 复制到插件目录
                 os.makedirs(plugin_dir, exist_ok=True)
-                # 删除旧的 .tmp 文件
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
-                # 直接写入 .jpi
                 with open(tmp_file, 'rb') as src:
                     with open(jpi_path, 'wb') as dst:
                         dst.write(src.read())
@@ -181,7 +214,8 @@ for pname in plugin_names:
         print(f"  [FAIL] {pname} (HTTP 不可达或插件不存在)")
         fail_count += 1
 
-print(f"\n  结果: 成功={ok_count}  跳过={skip_count}  失败={fail_count}")
+# 统计已存在的
+print(f"\n  结果: 成功={ok_count}  已存在={skip_count}  失败={fail_count}  总计={len(all_needed)}")
 PYEOF
 
 # ── 清理 ────────────────────────────────────────────────

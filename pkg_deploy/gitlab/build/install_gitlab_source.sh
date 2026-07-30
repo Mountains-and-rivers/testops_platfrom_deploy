@@ -131,6 +131,37 @@ step "[2/7] 初始化 GitLab（DB schema + seed）..."
 
 cd "${GITLAB_DIR}"
 
+# 确保 Redis 配置文件存在且密码正确（@ 需 URL 编码为 %40）
+if [ ! -f config/resque.yml ] || ! grep -q 'Pg1%40zendao2024' config/resque.yml 2>/dev/null; then
+    info "  生成 resque.yml..."
+    cat > config/resque.yml << RESQUEEOF
+development:
+  url: redis://localhost:6379
+test:
+  url: redis://localhost:6379
+production:
+  url: redis://:Pg1%40zendao2024@127.0.0.1:6379
+RESQUEEOF
+    chown git:git config/resque.yml
+    info "  ✓ resque.yml 已创建"
+fi
+if [ ! -f config/cable.yml ] || ! grep -q 'Pg1%40zendao2024' config/cable.yml 2>/dev/null; then
+    info "  生成 cable.yml..."
+    cat > config/cable.yml << CABLEEOF
+development:
+  adapter: redis
+  url: redis://localhost:6379
+test:
+  adapter: redis
+  url: redis://localhost:6379
+production:
+  adapter: redis
+  url: redis://:Pg1%40zendao2024@127.0.0.1:6379
+CABLEEOF
+    chown git:git config/cable.yml
+    info "  ✓ cable.yml 已创建"
+fi
+
 # 检查是否已初始化（有 schema_migrations 表说明已完成）
 SCHEMA_DONE=$(su - postgres -c "psql -tAc \"SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations'\"" gitlabhq_production 2>/dev/null || echo "0")
 if [ "${SCHEMA_DONE}" = "1" ]; then
@@ -192,6 +223,12 @@ GITALYCONF
                 sudo -u git -H sed -i "s|gitaly_address:.*|gitaly_address: unix:${GITLAB_DIR}/tmp/sockets/private/gitaly.socket|" "${GITLAB_DIR}/config/gitlab.yml"
                 info "  ✓ gitlab.yml gitaly_address 已同步"
             fi
+
+            # 同步 gitlab.yml 的 gitaly.token，确保 HMAC 认证匹配
+            if grep -q 'token:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
+                sudo -u git -H sed -i "/^  gitaly:/,/^  [a-z]/{s|^    token:.*|    token: '${_gitaly_token}'|}" "${GITLAB_DIR}/config/gitlab.yml"
+                info "  ✓ gitlab.yml gitaly.token 已同步"
+            fi
         fi
         # gitlab.target 必须存在，否则 systemctl enable 报依赖错误
         if [ ! -f /etc/systemd/system/gitlab.target ]; then
@@ -232,7 +269,7 @@ TARGETEOF
     info "  执行 rake gitlab:setup（创建表结构 + 种子数据）..."
     info "  （此步骤需要 2-5 分钟，请耐心等待）"
     info "  日志: /tmp/rake_setup.log"
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:setup RAILS_ENV=production force=yes --trace 2>&1 | tee /tmp/rake_setup.log \
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rake gitlab:setup RAILS_ENV=production force=yes --trace 2>&1 | tee /tmp/rake_setup.log \
         || { warn "  完整日志: /tmp/rake_setup.log"; tail -80 /tmp/rake_setup.log; err "rake gitlab:setup 失败，详见 /tmp/rake_setup.log"; }
 
     info "  ✓ GitLab 初始化完成"

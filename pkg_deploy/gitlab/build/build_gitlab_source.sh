@@ -352,6 +352,15 @@ else
     fi
 fi
 
+# GitLab 需要 btree_gist / pg_trgm 扩展（由 postgresql-contrib 提供）
+PG_MAJOR_VER=$(psql --version 2>&1 | awk '{print $3}' | cut -d. -f1)
+if [ ! -f "/usr/pgsql-${PG_MAJOR_VER}/share/extension/btree_gist.control" ]; then
+    info "  安装 postgresql${PG_MAJOR_VER}-contrib（btree_gist / pg_trgm 扩展）..."
+    dnf install -y "postgresql${PG_MAJOR_VER}-contrib" 2>/dev/null \
+        || rpm -ivh "https://download.postgresql.org/pub/repos/yum/${PG_MAJOR_VER}/redhat/rhel-9-x86_64/postgresql${PG_MAJOR_VER}-contrib-${PG_MAJOR_VER}.4-1PGDG.rhel9.x86_64.rpm" 2>/dev/null \
+        || warn "  postgresql${PG_MAJOR_VER}-contrib 安装失败，请手动安装"
+fi
+
 # ═══════════════════════════════════════════════
 # 9. Redis 检查
 # ═══════════════════════════════════════════════
@@ -446,8 +455,8 @@ fi
 # resque.yml — 后台任务配置
 if [ ! -f config/resque.yml ] || [ ! -s config/resque.yml ]; then
     sudo -u git -H cp config/resque.yml.example config/resque.yml 2>/dev/null || true
-    # 注入 Redis 密码
-    sudo -u git -H sed -i 's|# redis.*|redis: redis://:Pg1@zendao2024@127.0.0.1:6379|' config/resque.yml 2>/dev/null || true
+    # 注入 Redis 密码（@ 需 URL 编码为 %40）
+    sudo -u git -H sed -i 's|url: unix:/var/run/redis/redis.sock|url: redis://:Pg1%40zendao2024@127.0.0.1:6379|' config/resque.yml 2>/dev/null || true
     info "  ✓ resque.yml"
 else
     info "  ✓ resque.yml (已存在)"
@@ -456,8 +465,8 @@ fi
 # cable.yml — ActionCable 配置（GitLab 17.x 需要）
 if [ ! -f config/cable.yml ] || [ ! -s config/cable.yml ]; then
     sudo -u git -H cp config/cable.yml.example config/cable.yml 2>/dev/null || true
-    # 注入 Redis 密码
-    sudo -u git -H sed -i 's|url:.*|url: redis://:Pg1@zendao2024@127.0.0.1:6379|' config/cable.yml 2>/dev/null || true
+    # 注入 Redis 密码（@ 需 URL 编码为 %40）
+    sudo -u git -H sed -i 's|url:.*|url: redis://:Pg1%40zendao2024@127.0.0.1:6379|' config/cable.yml 2>/dev/null || true
     info "  ✓ cable.yml"
 else
     info "  ✓ cable.yml (已存在)"
