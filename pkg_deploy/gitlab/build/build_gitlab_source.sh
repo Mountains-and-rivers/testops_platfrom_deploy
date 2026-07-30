@@ -192,7 +192,8 @@ else
         git clone --depth 1 "${GITALY_REPO}" /tmp/gitaly-build
     fi
     cd /tmp/gitaly-build
-    make git GIT_PREFIX=/usr/local     cd /tmp; rm -rf /tmp/gitaly-build
+    make git GIT_PREFIX=/usr/local
+    cd /tmp; rm -rf /tmp/gitaly-build
     info "  ✓ Git $(git --version)"
 fi
 
@@ -237,7 +238,8 @@ else
     cd /tmp; rm -rf /tmp/ruby-src "/tmp/${RUBY_SRC}"
 
     # RubyGems
-    gem update --system --no-document     info "  ✓ $(ruby --version)"
+    gem update --system --no-document
+    info "  ✓ $(ruby --version)"
 fi
 
 # ═══════════════════════════════════════════════
@@ -301,7 +303,8 @@ else
 
     tar -C /usr/local --strip-components=1 -xJf "/tmp/${NODE_TGZ}"
     rm -f "/tmp/${NODE_TGZ}"
-    npm install -g yarn     info "  ✓ Node $(node --version), Yarn $(yarn --version)"
+    npm install -g yarn
+    info "  ✓ Node $(node --version), Yarn $(yarn --version)"
 fi
 
 # ═══════════════════════════════════════════════

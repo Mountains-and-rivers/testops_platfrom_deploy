@@ -75,15 +75,13 @@ RUN NODE_TAR=$(ls /tmp/node-v*-linux-x64.tar.gz 2>/dev/null | head -1) \
     fi \
     && rm -f /tmp/node-v*-linux-x64.tar.gz
 
-# 编译（-Pquick-build 官方快速构建 profile，JDK 版本由 build_image.sh 自动匹配）
-# 使用 BuildKit cache mount 持久化 Maven 本地仓库，避免每次重新下载依赖
-# 三级重试（适配有/无/部分缓存三种场景）：
-#   ① 在线 clean install — 完整构建
-#   ② 在线 install（跳过 clean）— 网络抖动重试，保留已下载依赖
-#   ③ 离线 install -o — 仅当 ① 至少下载了部分依赖时可增量续跑
+# 编译（-Pquick-build 官方快速构建 profile）
+# BuildKit cache mount 持久化 /root/.m2，避免重复下载依赖
+# 三级退化重试：在线 clean install → 在线 install → 离线 install -o
+# 去掉 --no-transfer-progress，保留 --batch-mode，让用户能看到进度
 RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
     cd /tmp/jenkins-src \
-    && mvn_opts="-pl war,bom -am \
+    && MVN_OPTS="-pl war,bom -am \
         -Pquick-build \
         -Dmaven.buildNumber.skip=true \
         -Dcheckstyle.skip=true \
@@ -92,23 +90,25 @@ RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
         -Dmaven.wagon.http.retryHandler.count=3 \
         -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 \
         -Dmaven.wagon.rto=30000 \
-        --batch-mode --no-transfer-progress" \
-    && mvn_retry=0 \
-    && ( while [ ${mvn_retry} -lt 3 ]; do \
-            case ${mvn_retry} in \
-                0) echo ">>> Maven 编译 (1/3) clean install 在线"; \
-                   mvn ${mvn_opts} clean install && exit 0 ;; \
-                1) echo ">>> Maven 编译 (2/3) install 在线（跳过 clean，重试网络）"; \
-                   mvn ${mvn_opts} install && exit 0 ;; \
-                2) echo ">>> Maven 编译 (3/3) install 离线（使用已缓存依赖增量续跑）"; \
-                   mvn ${mvn_opts} install -o && exit 0 ;; \
-            esac; \
-            mvn_retry=$((mvn_retry + 1)); \
-            echo ">>> 第 ${mvn_retry} 次尝试失败，准备重试..."; \
-            sleep 5; \
-        done; \
-        echo ">>> 3 次尝试全部失败"; exit 1; \
+        --batch-mode" \
+    && echo "============================================" \
+    && echo ">>> (1/3) mvn clean install（在线）" \
+    && echo "============================================" \
+    && (mvn ${MVN_OPTS} clean install && echo ">>> (1/3) 成功") \
+    || (echo ">>> (1/3) 失败，5s 后重试..." && sleep 5 \
+        && echo "============================================" \
+        && echo ">>> (2/3) mvn install（在线，跳过 clean）" \
+        && echo "============================================" \
+        && (mvn ${MVN_OPTS} install && echo ">>> (2/3) 成功") \
+        || (echo ">>> (2/3) 失败，5s 后重试..." && sleep 5 \
+            && echo "============================================" \
+            && echo ">>> (3/3) mvn install -o（离线，限已有缓存）" \
+            && echo "============================================" \
+            && (mvn ${MVN_OPTS} install -o && echo ">>> (3/3) 成功") \
+            || (echo ">>> 3 次全部失败" && exit 1) \
+           ) \
        ) \
+    && echo ">>> Maven 编译完成" \
     && cp war/target/jenkins.war /tmp/jenkins.war \
     && cd / && rm -rf /tmp/jenkins-src
 
