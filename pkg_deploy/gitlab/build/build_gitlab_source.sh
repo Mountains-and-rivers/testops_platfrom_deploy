@@ -97,6 +97,8 @@ command -v curl &>/dev/null || { dnf install -y curl 2>/dev/null || true; }
 # ═══════════════════════════════════════════════
 step "[1/13] 系统编译依赖..."
 dnf install -y epel-release 2>/dev/null || true
+# CRB (CodeReady Builder): libyaml-devel / gdbm-devel 等在此仓库
+dnf config-manager --set-enabled crb 2>/dev/null || true
 
 dnf install -y --setopt=tsflags=nodocs \
     gcc gcc-c++ make cmake pkg-config autoconf automake \
