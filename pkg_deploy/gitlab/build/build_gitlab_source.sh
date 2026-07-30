@@ -277,9 +277,11 @@ else
     info "  ✓ $(go version)"
 fi
 
-# 配置 Go 国内代理
+# 配置 Go 国内代理 + 模块模式
+go env -w GO111MODULE=on
 go env -w GOPROXY=https://goproxy.cn,direct
-info "  ✓ GOPROXY=https://goproxy.cn"
+go env -w GOSUMDB=sum.golang.org
+info "  ✓ GOPROXY=https://goproxy.cn  GO111MODULE=on"
 
 # ═══════════════════════════════════════════════
 # 6. Node.js 20.x + Yarn
@@ -297,10 +299,12 @@ else
         cp "${_SCRIPT_DIR}/${NODE_TGZ}" "/tmp/${NODE_TGZ}"
     else
         NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TGZ}"
+        NODE_MIRROR="https://npmmirror.com/mirrors/node/v${NODE_VERSION}/${NODE_TGZ}"
         info "  下载: ${NODE_URL}"
         for i in 1 2 3; do
             wget -q --show-progress -O "/tmp/${NODE_TGZ}" "${NODE_URL}" 2>/dev/null \
-                || curl -L -o "/tmp/${NODE_TGZ}" "${NODE_URL}" \
+                || wget -q --show-progress -O "/tmp/${NODE_TGZ}" "${NODE_MIRROR}" 2>/dev/null \
+                || curl -L -o "/tmp/${NODE_TGZ}" "${NODE_MIRROR}" \
                 && break
             warn "  重试 (${i}/3)"; sleep 5
         done
@@ -309,6 +313,12 @@ else
 
     tar -C /usr/local --strip-components=1 -xJf "/tmp/${NODE_TGZ}"
     rm -f "/tmp/${NODE_TGZ}"
+
+    # 配置 npm / yarn 国内镜像
+    npm config set registry https://registry.npmmirror.com
+    yarn config set registry https://registry.npmmirror.com 2>/dev/null || true
+    info "  ✓ npm/yarn registry: https://registry.npmmirror.com"
+
     npm install -g yarn
     info "  ✓ Node $(node --version), Yarn $(yarn --version)"
 fi
@@ -479,6 +489,8 @@ step "[13/13] 编译安装 GitLab 子组件..."
 
 # 确保 git 用户也有 Go 代理
 sudo -u git -H go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
+sudo -u git -H go env -w GO111MODULE=on 2>/dev/null || true
+sudo -u git -H go env -w GOSUMDB=sum.golang.org 2>/dev/null || true
 
 cd "${GITLAB_DIR}"
 

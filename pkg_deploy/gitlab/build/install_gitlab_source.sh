@@ -179,6 +179,10 @@ if [ -d "node_modules" ] && [ "$(ls node_modules/.package-lock.json 2>/dev/null)
 fi
 
 if [ ! -d "node_modules" ] || [ "$(find node_modules -maxdepth 1 -type d | wc -l)" -lt 50 ]; then
+    # 为 git 用户配置 npm/yarn 国内镜像
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" npm config set registry https://registry.npmmirror.com 2>/dev/null || true
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn config set registry https://registry.npmmirror.com 2>/dev/null || true
+
     info "  yarn install --production --pure-lockfile..."
     sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production --pure-lockfile  \
         || { warn "yarn install 失败，尝试不带 --pure-lockfile..."; sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production ; }
