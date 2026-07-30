@@ -113,6 +113,7 @@ dnf config-manager --set-enabled crb 2>/dev/null || true
 
 dnf install -y --setopt=tsflags=nodocs \
     gcc gcc-c++ make cmake pkg-config autoconf automake \
+    meson ninja-build \
     git curl wget patch \
     zlib-devel openssl-devel readline-devel \
     libxml2-devel libxslt-devel libicu-devel \

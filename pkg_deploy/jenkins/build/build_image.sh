@@ -182,14 +182,14 @@ docker rmi -f "${FULL_IMAGE}" "${LATEST_IMAGE}" 2>/dev/null || true
 # 启用 BuildKit（支持 RUN --mount=type=cache 持久化 Maven 依赖缓存）
 export DOCKER_BUILDKIT=1
 
-docker build --no-cache \r
-    --progress=plain \r
-    --build-arg "JENKINS_VERSION=${JENKINS_VERSION}" \r
-    --build-arg "JDK_VERSION=${JDK_VERSION}" \r
-    -t "${FULL_IMAGE}" \r
-    -t "${LATEST_IMAGE}" \r
-    -f "${DOCKERFILE}" \r
-    "${BUILD_CTX}" 2>&1 | tee "/tmp/docker_build_${JENKINS_VERSION}.log" \r
+docker build --no-cache \
+    --progress=plain \
+    --build-arg "JENKINS_VERSION=${JENKINS_VERSION}" \
+    --build-arg "JDK_VERSION=${JDK_VERSION}" \
+    -t "${FULL_IMAGE}" \
+    -t "${LATEST_IMAGE}" \
+    -f "${DOCKERFILE}" \
+    "${BUILD_CTX}" 2>&1 | tee "/tmp/docker_build_${JENKINS_VERSION}.log" \
     || die "Docker build failed, log: /tmp/docker_build_${JENKINS_VERSION}.log"
 
 ok "镜像: ${FULL_IMAGE}"
