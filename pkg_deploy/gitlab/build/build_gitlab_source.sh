@@ -114,12 +114,13 @@ dnf config-manager --set-enabled crb 2>/dev/null || true
 dnf install -y --setopt=tsflags=nodocs \
     gcc gcc-c++ make cmake pkg-config autoconf automake \
     meson ninja-build \
-    git curl wget patch \
+    git curl wget patch tar bzip2 xz \
     zlib-devel openssl-devel readline-devel \
     libxml2-devel libxslt-devel libicu-devel \
     libcurl-devel expat-devel pcre2-devel \
     libyaml-devel libffi-devel gdbm-devel re2-devel \
     ncurses-devel perl perl-Image-ExifTool \
+    postgresql-devel \
     GraphicsMagick postfix logrotate rsync
 info "  ✓ 编译工具链就绪"
 

@@ -140,7 +140,9 @@ sudo -u git -H vim config/cable.yml      # Redis
 | CentOS 9 包 | 对应 Debian 包 | 用途 |
 |-------------|---------------|------|
 | `gcc gcc-c++ make` | `build-essential` | C/C++ 编译工具链 |
-| `cmake pkg-config` | `cmake pkg-config` | 构建系统 |
+| `cmake pkg-config autoconf automake` | `cmake pkg-config ...` | 构建系统 |
+| `meson ninja-build` | `meson ninja-build` | Gitaly 构建（GitLab 19.x 新增） |
+| `git curl wget patch tar bzip2 xz` | `git curl ...` | 源码获取 & 解压 |
 | `zlib-devel` | `zlib1g-dev` | 压缩库 |
 | `openssl-devel` | `libssl-dev` | SSL/TLS |
 | `readline-devel` | `libreadline-dev` | Ruby 命令行编辑 |
@@ -156,7 +158,7 @@ sudo -u git -H vim config/cable.yml      # Redis
 | `re2-devel` | `libre2-dev` | 正则引擎 |
 | `ncurses-devel` | `libncurses5-dev` | 终端 UI |
 | `perl-Image-ExifTool` | `libimage-exiftool-perl` | Workhorse 图片 EXIF 剥离 |
-| `postgresql-devel` | `libpq-dev` | PostgreSQL 客户端库 |
+| `postgresql-devel` | `libpq-dev` | pg gem 原生扩展编译 |
 | `postfix` | `postfix` | 邮件发送 |
 
 **运行时（已有独立安装脚本）：**
