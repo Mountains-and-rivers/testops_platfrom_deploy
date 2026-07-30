@@ -12,8 +12,8 @@
 #   Workhorse: https://gitlab.com/gitlab-org/gitlab-workhorse.git ⚠ 仅 GitLab.com
 #
 # 用法: bash build_gitlab.sh [模式] [版本]
-# 示例: bash build_gitlab.sh omnibus 17.4.0
-#       bash build_gitlab.sh source  17.4.0
+# 示例: bash build_gitlab.sh omnibus 19.3.0-pre
+#       bash build_gitlab.sh source  19.3.0-pre
 # ============================================================
 set -euo pipefail
 

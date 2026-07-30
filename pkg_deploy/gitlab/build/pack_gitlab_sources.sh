@@ -6,7 +6,7 @@
 # 关键: 子组件版本从 gitlab-foss 的 VERSION 文件中读取，
 #       确保与 GitLab 主应用版本精确匹配，而非盲目拉 master/main
 #
-# 用法: bash pack_gitlab_sources.sh [17-4-stable]
+# 用法: bash pack_gitlab_sources.sh [19-3-stable]
 # ============================================================
 set -euo pipefail
 

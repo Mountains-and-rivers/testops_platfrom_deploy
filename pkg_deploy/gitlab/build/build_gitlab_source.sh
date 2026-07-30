@@ -5,8 +5,8 @@
 # 官方仅支持 Debian/Ubuntu，此脚本将依赖映射到 CentOS 9
 #
 # 用法: bash build_gitlab_source.sh [版本分支] [--skip-ruby] [--skip-go] [--skip-node]
-# 示例: bash build_gitlab_source.sh 17-4-stable
-#       bash build_gitlab_source.sh 17-4-stable --skip-ruby --skip-go
+# 示例: bash build_gitlab_source.sh 19-3-stable
+#       bash build_gitlab_source.sh 19-3-stable --skip-ruby --skip-go
 # ============================================================
 set -euo pipefail
 

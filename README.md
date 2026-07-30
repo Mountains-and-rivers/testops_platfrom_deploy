@@ -158,30 +158,56 @@ testops_platform_deploy/
 ### 完整部署链路
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  K8s 集群部署 → Prometheus 监控栈 → Wiki.js → 禅道 → MeterSphere → AI 测试工具集  │
-│     (P0)            (P1)            (P2)    (P2)      (P1)           (P3)       │
-└─────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│  基础设施层                        K8s 平台层                       │
+│  ────────────                      ──────────                       │
+│  Nginx → Harbor → Jenkins → GitLab │                                │
+│    ↓                                │                                │
+│  PostgreSQL 16 + Redis 7 + MySQL   │                                │
+│    ↓                                ↓                                │
+│  禅道应用 ←────────────────── K8s 集群部署 (P0)                      │
+│                                      ↓                              │
+│                              Prometheus 监控栈 (P1)                  │
+│                                      ↓                              │
+│                              MeterSphere (P1)                       │
+│                                      ↓                              │
+│                              AI 测试工具集 (P3)                     │
+│                                      ↓                              │
+│                              Wiki.js (P2)                           │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ### 依赖关系
 
 ```
-K8s 集群部署 ─────────────┬──→ Prometheus 监控栈 ──→ MeterSphere
-                           │
-                           ├──→ Wiki.js
-                           │
-                           ├──→ 禅道
-                           │
-                           └──→ MeterSphere ──→ AI 测试工具集
+基础设施（裸机/VM）:
+  Nginx / PostgreSQL 16 / Redis 7 / MySQL 8.0
+    └──→ GitLab CE / Harbor / Jenkins / 禅道应用 / Java CI/CD
+
+K8s 平台层:
+  K8s 集群部署 ──────┬──→ Prometheus 监控栈 ──→ MeterSphere
+                      │
+                      ├──→ 禅道（可 K8s 部署）
+                      │
+                      ├──→ Wiki.js
+                      │
+                      └──→ Java 应用 CI/CD
 ```
 
 | 组件 | 前置依赖 | 部署阶段 |
 |------|---------|---------|
+| Nginx | 无 | 基础设施层 |
+| PostgreSQL 16 | 无 | 基础设施层 |
+| Redis 7 | 无 | 基础设施层 |
+| MySQL 8.0 | 无 | 基础设施层 |
+| Harbor 镜像仓库 | Nginx（可选） | 基础设施层 |
+| Jenkins CI/CD | JDK、Maven | 基础设施层 |
+| GitLab CE | PostgreSQL、Redis、Nginx | 基础设施层 |
+| 禅道应用 | MySQL、PHP | 平台服务层 |
+| Java 应用 CI/CD | Jenkins、K8s 集群 | CI/CD 层 |
 | K8s 集群部署 | 无 | 基础设施层 |
 | Prometheus 监控栈 | K8s 集群 | 可观测性层 |
 | Wiki.js | K8s 集群 | 平台服务层 |
-| 禅道 | K8s 集群 | 平台服务层 |
 | MeterSphere | K8s 集群、Prometheus 监控栈 | 平台服务层 |
 | AI 测试工具集 | K8s 集群、MeterSphere | 平台服务层 |
 
