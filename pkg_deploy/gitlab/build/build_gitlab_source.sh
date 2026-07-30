@@ -280,7 +280,8 @@ fi
 # 配置 Go 国内代理 + 模块模式
 go env -w GO111MODULE=on
 go env -w GOPROXY=https://goproxy.cn,direct
-info "  ✓ GOPROXY=https://goproxy.cn  GO111MODULE=on"
+go env -w GOFLAGS=-v
+info "  ✓ GOPROXY=https://goproxy.cn  GO111MODULE=on  GOFLAGS=-v"
 
 # ═══════════════════════════════════════════════
 # 6. Node.js 20.x + Yarn
@@ -486,9 +487,11 @@ fi
 # ═══════════════════════════════════════════════
 step "[13/13] 编译安装 GitLab 子组件..."
 
-# 确保 git 用户也有 Go 代理
+# 确保 git 用户也有 Go 代理 + 编译过程输出到控制台
 sudo -u git -H go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
 sudo -u git -H go env -w GO111MODULE=on 2>/dev/null || true
+sudo -u git -H go env -w GOFLAGS=-v 2>/dev/null || true
+export GOFLAGS=-v
 
 cd "${GITLAB_DIR}"
 

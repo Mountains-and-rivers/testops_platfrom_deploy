@@ -44,10 +44,6 @@ ENV JAVA_HOME=/usr/lib/jvm/java-${JDK_VERSION}-openjdk \
     MAVEN_HOME=/opt/maven \
     PATH=/opt/maven/bin:/usr/lib/jvm/java-${JDK_VERSION}-openjdk/bin:${PATH}
 
-# Maven settings（华为云统一代理全部仓库，mirrorOf=* 不遗漏任何 repo ID）
-RUN mkdir -p /root/.m2 \
-    && echo '<?xml version="1.0" encoding="UTF-8"?><settings><mirrors><mirror><id>huawei-maven</id><mirrorOf>*</mirrorOf><name>Huawei Maven Mirror</name><url>https://repo.huaweicloud.com/repository/maven/</url></mirror></mirrors></settings>' > /root/.m2/settings.xml
-
 # 源码（由 build_image.sh 复制本地 jenkins.zip 到构建上下文）
 COPY jenkins.zip /tmp/
 RUN unzip -q /tmp/jenkins.zip -d /tmp/jenkins-src \
@@ -87,7 +83,9 @@ RUN NODE_TAR=$(ls /tmp/node-v*-linux-x64.tar.gz 2>/dev/null | head -1) \
 # 三级退化重试：在线 clean install → 在线 install → 离线 install -o
 # 去掉 --no-transfer-progress，保留 --batch-mode，让用户能看到进度
 RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
-    cd /tmp/jenkins-src \
+    mkdir -p /root/.m2 \
+    && echo '<?xml version="1.0" encoding="UTF-8"?><settings><mirrors><mirror><id>huawei-maven</id><mirrorOf>*</mirrorOf><name>Huawei Maven Mirror</name><url>https://repo.huaweicloud.com/repository/maven/</url></mirror></mirrors></settings>' > /root/.m2/settings.xml \
+    && cd /tmp/jenkins-src \
     && MVN_OPTS="-pl war,bom -am \
         -Pquick-build \
         -Dmaven.buildNumber.skip=true \
