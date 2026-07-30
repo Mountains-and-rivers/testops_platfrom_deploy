@@ -1,0 +1,5 @@
+# 大文件不上传 git
+*.tar.gz
+*.tar.xz
+*.tar
+*.zip

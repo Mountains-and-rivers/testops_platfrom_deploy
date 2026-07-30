@@ -47,9 +47,9 @@ testops_platform_deploy/
 │   ├── workflow_state.py                       # 工作流状态持久化管理（断点续跑、进度追踪）
 │   └── report_generator.py                     # 标准化报告生成工具（Text/JSON/YAML）
 │
-├── modules/                                    # 【核心：所有业务部署组件目录，一组件一目录】
+├── pkg_deploy/                                    # 【核心：所有业务部署组件目录，一组件一目录】
 │   │
-│   ├── k8s_cluster_deploy/                     # 组件：K8s集群部署模块（蛇形命名，统一规范）
+│   ├── k8s_cluster/                     # 组件：K8s集群部署模块（蛇形命名，统一规范）
 │   │   ├── .gitignore
 │   │   ├── README.md                           # 当前组件独立文档、支持版本、组件CLI命令清单
 │   │   ├── module_main.py                      # 组件独立CLI入口（click）
@@ -93,11 +93,16 @@ testops_platform_deploy/
 │   │       ├── verify_reports/                 # 健康校验报告
 │   │       └── backup_files/                   # 备份文件存储
 │   │
-│   ├── zentao_deploy/                          # 后续扩展：禅道平台（目录结构复用k8s模板）
-│   ├── wikijs_deploy/                          # 后续扩展：Wiki.js文档平台
-│   ├── prometheus_stack_deploy/                # 后续扩展：Prometheus监控栈
-│   ├── metersphere_deploy/                     # 后续扩展：MeterSphere测试平台
-│   └── ai_test_suite_deploy/                   # 后续扩展：AI测试工具集
+│   ├── harbor/                                 # Harbor 镜像仓库部署
+│   ├── jenkins/                                # Jenkins CI/CD 部署
+│   ├── mysql8.0/                               # MySQL 8.0 部署
+│   ├── zentao/                                 # 禅道应用部署
+│   ├── java_app_cicd/                          # Java 应用 CI/CD 部署
+│   ├── zentao_cli/                          # 禅道部署 CLI（Python 工程）
+│   ├── wikijs/                          # 后续扩展：Wiki.js文档平台
+│   ├── prometheus_stack/                # 后续扩展：Prometheus监控栈
+│   ├── metersphere/                     # 后续扩展：MeterSphere测试平台
+│   └── ai_test_suite/                   # 后续扩展：AI测试工具集
 │
 ├── orchestration/                              # 全局编排层：多组件批量执行流水线定义
 │   ├── full_stack_install.yaml                 # 整套平台顺序部署流水线（3阶段）
@@ -128,12 +133,12 @@ testops_platform_deploy/
 
 | 组件 | 目录 | 状态 | 优先级 | 说明 |
 |------|------|------|--------|------|
-| K8s 集群部署 | `modules/k8s_cluster_deploy/` | ✅ 已实现 | P0 | Kubernetes 集群自动化部署（8阶段） |
-| 禅道平台 | `modules/zentao_deploy/` | 🔲 规划中 | P2 | 禅道项目管理平台部署 |
-| Wiki.js | `modules/wikijs_deploy/` | 🔲 规划中 | P2 | Wiki.js 文档平台部署 |
-| Prometheus 监控栈 | `modules/prometheus_stack_deploy/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager |
-| MeterSphere | `modules/metersphere_deploy/` | 🔲 规划中 | P1 | MeterSphere 测试平台部署 |
-| AI 测试工具集 | `modules/ai_test_suite_deploy/` | 🔲 规划中 | P3 | AI 辅助测试工具部署 |
+| K8s 集群部署 | `pkg_deploy/k8s_cluster/` | ✅ 已实现 | P0 | Kubernetes 集群自动化部署（8阶段） |
+| 禅道平台 | `pkg_deploy/zentao_cli/` | 🔲 规划中 | P2 | 禅道项目管理平台部署 |
+| Wiki.js | `pkg_deploy/wikijs/` | 🔲 规划中 | P2 | Wiki.js 文档平台部署 |
+| Prometheus 监控栈 | `pkg_deploy/prometheus_stack/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager |
+| MeterSphere | `pkg_deploy/metersphere/` | 🔲 规划中 | P1 | MeterSphere 测试平台部署 |
+| AI 测试工具集 | `pkg_deploy/ai_test_suite/` | 🔲 规划中 | P3 | AI 辅助测试工具部署 |
 
 ## 部署顺序
 
@@ -176,13 +181,13 @@ K8s 集群部署 ─────────────┬──→ Prometheus 
 python main.py install --all
 
 # 安装指定组件
-python main.py install --components k8s_cluster_deploy prometheus_stack_deploy
+python main.py install --components k8s_cluster prometheus_stack
 
 # 打印安装计划（不实际执行）
 python main.py install --all --dry-run
 
 # 强制重新安装（跳过已安装状态检查）
-python main.py install --components k8s_cluster_deploy --force
+python main.py install --components k8s_cluster --force
 ```
 
 ### uninstall — 卸载
@@ -192,7 +197,7 @@ python main.py install --components k8s_cluster_deploy --force
 python main.py uninstall --all
 
 # 卸载指定组件
-python main.py uninstall --components metersphere_deploy
+python main.py uninstall --components metersphere
 
 # 强制卸载（跳过确认）
 python main.py uninstall --all --force
@@ -208,7 +213,7 @@ python main.py uninstall --all --dry-run
 python main.py check --all
 
 # 指定组件健康检查
-python main.py check --components k8s_cluster_deploy
+python main.py check --components k8s_cluster
 
 # 输出报告到指定路径
 python main.py check --all --output reports/global_summary/health_report.txt
@@ -221,7 +226,7 @@ python main.py check --all --output reports/global_summary/health_report.txt
 python main.py backup --all
 
 # 指定组件备份
-python main.py backup --components k8s_cluster_deploy zentao_deploy
+python main.py backup --components k8s_cluster zentao_cli
 ```
 
 ### 其他命令
@@ -239,7 +244,7 @@ python main.py version
 ### 一键安装/卸载
 
 ```bash
-cd modules/k8s_cluster_deploy
+cd pkg_deploy/k8s_cluster
 
 # 一键安装（Stage 0→7，支持断点续跑）
 python module_main.py install
@@ -282,7 +287,7 @@ sudo bash scripts/pull_k8s_images.sh
 sudo bash scripts/pull_k8s_images.sh --calico v3.27.0
 
 # 拷贝到工作站
-scp root@<master-ip>:~/k8s-images/*.tar modules/k8s_cluster_deploy/images/
+scp root@<master-ip>:~/k8s-images/*.tar pkg_deploy/k8s_cluster/images/
 ```
 
 ### 单独组件命令
@@ -346,7 +351,7 @@ python module_main.py status
 每个阶段执行时实时写入 `runtime/workflow.state`（YAML 格式），记录：
 
 ```yaml
-component_name: k8s_cluster_deploy
+component_name: k8s_cluster
 workflow_type: install
 created_at: 1721923200.0
 updated_at: 1721926800.0
@@ -368,15 +373,15 @@ stages:
 
 ```bash
 # 从失败的 Stage 2 重新开始
-python -m modules.k8s_cluster_deploy.module_main install --stage 2
+python -m pkg_deploy.k8s_cluster.module_main install --stage 2
 ```
 
 ### 进度查询
 
 ```bash
-python -m modules.k8s_cluster_deploy.module_main status
+python -m pkg_deploy.k8s_cluster.module_main status
 # 输出：
-# 组件: k8s_cluster_deploy
+# 组件: k8s_cluster
 # 工作流: install
 # 进度: 62.5%
 #   ✓ stage0_pre_check [success]
@@ -398,7 +403,7 @@ global_config/          ← 所有组件共享的全局配置
     ├── mirror_repo.yaml        → 镜像/软件源
     └── network_policy.yaml     → 网段/防火墙通用策略
 
-modules/<component>/config/     ← 各组件专属配置
+pkg_deploy/<component>/config/     ← 各组件专属配置
     ├── cluster_info.yaml       → 集群拓扑信息
     ├── node_list.yaml          → 节点连接信息（支持节点级覆盖全局 SSH 配置）
     ├── software_version.yaml   → 可选的版本清单
@@ -491,7 +496,7 @@ K8s 模块专用异常 (src/workflow/workflow_exception.py):
 
 ### 组件开发规范
 
-- 每个组件目录结构**完全复用** `k8s_cluster_deploy` 模板
+- 每个组件目录结构**完全复用** `k8s_cluster` 模板
 - 组件私有依赖写入 `<component>/requirements.txt`
 - 组件独立 CLI 入口为 `<component>/module_main.py`
 - 分阶段逻辑放在 `<component>/src/stages/` 目录
@@ -509,25 +514,25 @@ pip install -r requirements.txt
 
 ```bash
 # 编辑节点清单：填写实际服务器 IP、SSH 账号
-vim modules/k8s_cluster_deploy/config/node_list.yaml
+vim pkg_deploy/k8s_cluster/config/node_list.yaml
 
 # 编辑集群信息：确认 Pod/Service 网段
-vim modules/k8s_cluster_deploy/config/cluster_info.yaml
+vim pkg_deploy/k8s_cluster/config/cluster_info.yaml
 
 # 选择 K8s 版本
-vim modules/k8s_cluster_deploy/config/software_version.yaml
+vim pkg_deploy/k8s_cluster/config/software_version.yaml
 ```
 
 ### 3. 环境预检
 
 ```bash
-python -m modules.k8s_cluster_deploy.module_main check
+python -m pkg_deploy.k8s_cluster.module_main check
 ```
 
 ### 4. 执行部署
 
 ```bash
-python -m modules.k8s_cluster_deploy.module_main install
+python -m pkg_deploy.k8s_cluster.module_main install
 ```
 
 ### 5. 验证集群

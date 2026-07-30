@@ -1,0 +1,80 @@
+# ============================================================
+# K8s 节点系统初始化参数配置
+# ============================================================
+
+system_init:
+  # ----- SELinux -----
+  selinux:
+    mode: "disabled"                       # enforcing | permissive | disabled
+    reboot_if_changed: false
+
+  # ----- Swap -----
+  swap:
+    disable_permanently: true              # 永久关闭（修改 /etc/fstab）
+    reboot_if_changed: false
+
+  # ----- 防火墙 -----
+  firewall:
+    stop_service: true                     # 停止防火墙服务
+    disable_service: true                  # 禁用防火墙开机自启
+    manager: "firewalld"                   # firewalld | ufw | iptables
+
+  # ----- 内核模块 -----
+  kernel_pkg_deploy:
+    # 必须加载的模块
+    required:
+      - overlay
+      - br_netfilter
+      - ip_vs
+      - ip_vs_rr
+      - ip_vs_wrr
+      - ip_vs_sh
+      - nf_conntrack
+    # 禁止加载的模块
+    blacklist: []
+
+  # ----- 内核参数 -----
+  sysctl_params:
+    net.bridge.bridge-nf-call-iptables: 1
+    net.bridge.bridge-nf-call-ip6tables: 1
+    net.ipv4.ip_forward: 1
+    net.ipv4.tcp_tw_reuse: 1
+    net.ipv4.tcp_fin_timeout: 30
+    net.ipv4.tcp_keepalive_time: 1200
+    net.ipv4.tcp_max_syn_backlog: 8192
+    net.ipv4.tcp_max_tw_buckets: 5000
+    net.core.somaxconn: 32768
+    net.core.netdev_max_backlog: 16384
+    net.ipv4.neigh.default.gc_thresh1: 0
+    net.ipv4.neigh.default.gc_thresh2: 4096
+    net.ipv4.neigh.default.gc_thresh3: 8192
+    vm.swappiness: 0
+    vm.max_map_count: 262144
+    fs.file-max: 655360
+    fs.inotify.max_user_instances: 8192
+    fs.inotify.max_user_watches: 1048576
+
+  # ----- 系统资源限制 -----
+  limits:
+    nofile: 655360
+    nproc: 655360
+    core: unlimited
+    memlock: unlimited
+
+  # ----- CGroup 驱动 -----
+  cgroup:
+    driver: "systemd"                      # systemd | cgroupfs
+
+  # ----- 时间同步 -----
+  ntp:
+    enabled: true
+    service: "chronyd"
+    servers:
+      - ntp.aliyun.com
+      - ntp1.aliyun.com
+
+  # ----- Hosts 文件 -----
+  hosts:
+    # 自动从 node_list.yaml 生成，无需手动填写
+    # 此处可补充额外的主机名映射
+    extra_entries: []
