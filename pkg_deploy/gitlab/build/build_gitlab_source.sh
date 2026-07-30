@@ -448,10 +448,10 @@ if [ -d "vendor/bundle/ruby" ]; then
 fi
 
 if [ ! -d "vendor/bundle/ruby" ]; then
-    sudo -u git -H bundle config set --local deployment 'true'
-    sudo -u git -H bundle config set --local without 'development test kerberos'
-    sudo -u git -H bundle config path "${GITLAB_DIR}/vendor/bundle"
-    sudo -u git -H bundle install -j$(nproc)     info "  ✓ Gems 安装完成"
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle config set --local deployment 'true'
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle config set --local without 'development test kerberos'
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle config path "${GITLAB_DIR}/vendor/bundle"
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle install -j$(nproc)     info "  ✓ Gems 安装完成"
 fi
 
 # ═══════════════════════════════════════════════
@@ -487,7 +487,7 @@ if [ -f "${_SHELL_DST}/bin/gitlab-shell" ] || [ -f "${_SHELL_DST}/Makefile" ]; t
 else
     info "  安装 gitlab-shell..."
     cd "${GITLAB_DIR}"
-    sudo -u git -H bundle exec rake gitlab:shell:install RAILS_ENV=production fi
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:shell:install RAILS_ENV=production fi
 
 # ── GitLab Workhorse ──
 if [ -f "${_WORKHORSE_DST}/gitlab-workhorse" ] && "${_WORKHORSE_DST}/gitlab-workhorse" -version &>/dev/null 2>&1; then
@@ -501,7 +501,7 @@ else
     elif [ ! -f "${_WORKHORSE_DST}/Makefile" ]; then
         cd "${GITLAB_DIR}"
         info "  安装 gitlab-workhorse..."
-        sudo -u git -H bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production         cd "${_WORKHORSE_DST}"
+        sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production         cd "${_WORKHORSE_DST}"
         make 2>&1 || true
     fi
     info "  ✓ gitlab-workhorse 就绪"

@@ -88,7 +88,7 @@ systemctl is-active redis &>/dev/null && info "  ✓ Redis 运行中" \
     || { warn "  ✗ Redis 未运行，请先: systemctl start redis"; FAILED=1; }
 
 # 检查 Ruby 可用
-sudo -u git -H bash -c 'ruby --version' &>/dev/null && info "  ✓ Ruby 可用" \
+sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bash -c 'ruby --version' &>/dev/null && info "  ✓ Ruby 可用" \
     || { warn "  ✗ Ruby 不可用"; FAILED=1; }
 
 # 检查 Node/Yarn 可用
@@ -154,7 +154,7 @@ else
 
     info "  执行 rake gitlab:setup（创建表结构 + 种子数据）..."
     info "  （此步骤需要 2-5 分钟，请耐心等待）"
-    sudo -u git -H bundle exec rake gitlab:setup RAILS_ENV=production force=yes  \
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:setup RAILS_ENV=production force=yes  \
         || err "rake gitlab:setup 失败（检查数据库连接和 Redis）"
 
     info "  ✓ GitLab 初始化完成"
@@ -180,8 +180,8 @@ fi
 
 if [ ! -d "node_modules" ] || [ "$(find node_modules -maxdepth 1 -type d | wc -l)" -lt 50 ]; then
     info "  yarn install --production --pure-lockfile..."
-    sudo -u git -H yarn install --production --pure-lockfile  \
-        || { warn "yarn install 失败，尝试不带 --pure-lockfile..."; sudo -u git -H yarn install --production ; }
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production --pure-lockfile  \
+        || { warn "yarn install 失败，尝试不带 --pure-lockfile..."; sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production ; }
     info "  ✓ Node 依赖安装完成"
 fi
 
@@ -190,7 +190,7 @@ if [ -d "public/assets" ] && [ "$(ls public/assets/ | wc -l)" -gt 10 ]; then
     info "  ✓ public/assets 已编译，跳过 assets:compile"
 else
     info "  编译前端资源（此步骤 5-15 分钟）..."
-    sudo -u git -H bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production  \
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production  \
         || err "前端资源编译失败（可能需要更多内存，建议 >= 8GB）"
     info "  ✓ 前端资源编译完成"
 fi
@@ -408,7 +408,7 @@ echo "  HTTP: ${HTTP_CODE}"
 if ${READY}; then
     info "  设置 root 密码..."
     cd "${GITLAB_DIR}"
-    sudo -u git -H bundle exec rails runner "user = User.find_by(username:'root'); user.password='${ROOT_PASS}'; user.password_confirmation='${ROOT_PASS}'; user.save!" RAILS_ENV=production 2>/dev/null \
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rails runner "user = User.find_by(username:'root'); user.password='${ROOT_PASS}'; user.password_confirmation='${ROOT_PASS}'; user.save!" RAILS_ENV=production 2>/dev/null \
         && info "  ✓ root 密码已设置" \
         || info "  root 密码可能已设置，跳过"
 fi
@@ -428,6 +428,6 @@ echo "    systemctl stop gitlab.target      # 停止全部"
 echo "    systemctl status gitlab-gitaly    # 查看各组件状态"
 echo "    journalctl -u gitlab-puma -f     # 查看 Puma 日志"
 echo ""
-echo "  检查: cd ${GITLAB_DIR} && sudo -u git -H bundle exec rake gitlab:check RAILS_ENV=production"
+echo "  检查: cd ${GITLAB_DIR} && sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:check RAILS_ENV=production"
 echo "  卸载: bash clean_gitlab.sh source --data"
 echo "============================================"
