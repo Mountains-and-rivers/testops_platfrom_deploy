@@ -62,7 +62,7 @@ id git &>/dev/null && info "  ✓ git 用户" || { warn "  ✗ git 用户不存�
     || { warn "  ✗ 源码不存在: ${GITLAB_DIR}，请先执行 build_gitlab_source.sh"; FAILED=1; }
 
 # 检查 Gitaly
-[ -f "${GITALY_DIR}/gitaly" ] && info "  ✓ Gitaly: ${GITALY_DIR}" \
+[ -f "${GITALY_DIR}/_build/bin/gitaly" ] && info "  ✓ Gitaly: ${GITALY_DIR}" \
     || { warn "  ✗ Gitaly 未编译: ${GITALY_DIR}"; FAILED=1; }
 
 # 检查 GitLab Shell
@@ -238,7 +238,7 @@ User=git
 Group=git
 WorkingDirectory=${GITALY_DIR}
 Environment="HOME=${GITLAB_HOME}"
-ExecStart=${GITALY_DIR}/gitaly ${GITALY_DIR}/config.toml
+ExecStart=${GITALY_DIR}/_build/bin/gitaly ${GITALY_DIR}/config.toml
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536

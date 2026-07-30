@@ -509,7 +509,9 @@ _SHELL_DST="${GITLAB_HOME}/gitlab-shell"
 _WORKHORSE_DST="${GITLAB_HOME}/gitlab-workhorse"
 
 # ── Gitaly ──
-if [ -f "${_GITALY_DST}/gitaly" ] && "${_GITALY_DST}/gitaly" --version &>/dev/null 2>&1; then
+_GITALY_BIN="${_GITALY_DST}/_build/bin/gitaly"  # meson 构建输出路径
+
+if [ -f "${_GITALY_BIN}" ] && "${_GITALY_BIN}" --version &>/dev/null 2>&1; then
     info "  ✓ Gitaly 已编译"
 else
     if load_source_tar "gitaly" "${_GITALY_DST}"; then
@@ -520,8 +522,8 @@ else
     fi
     cd "${_GITALY_DST}"
     info "  编译 Gitaly..."
-    GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct GONOSUMDB=* GONOSUMCHECK=* GOPRIVATE= GOFLAGS=-v GO111MODULE=on make 2>&1 || err "Gitaly 编译失败"
-    [ -f "${_GITALY_DST}/gitaly" ] || err "Gitaly 编译产物缺失"
+    GOPROXY=https://goproxy.cn,direct GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-v GO111MODULE=on make 2>&1 || err "Gitaly 编译失败"
+    [ -f "${_GITALY_BIN}" ] || err "Gitaly 编译产物缺失: ${_GITALY_BIN}"
     info "  ✓ Gitaly 编译完成"
 fi
 
