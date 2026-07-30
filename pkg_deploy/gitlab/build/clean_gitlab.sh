@@ -129,7 +129,7 @@ case "${MODE}" in
 esac
 
 # ── 公共清理 ──
-step "[6/6] 公共临时文件..."
+step "[6] 公共临时文件..."
 rm -rf \
     /opt/build/gitlab \
     /tmp/gitlab-* \

@@ -514,8 +514,7 @@ else
     fi
     cd "${_GITALY_DST}"
     info "  编译 Gitaly..."
-    export GOPROXY=https://goproxy.cn,direct GOFLAGS=-v GO111MODULE=on
-    make 2>&1 || err "Gitaly 编译失败"
+    GOPROXY=https://goproxy.cn,direct GOFLAGS=-v GO111MODULE=on make 2>&1 || err "Gitaly 编译失败"
     [ -f "${_GITALY_DST}/gitaly" ] || err "Gitaly 编译产物缺失"
     info "  ✓ Gitaly 编译完成"
 fi

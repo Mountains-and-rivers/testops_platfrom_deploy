@@ -191,6 +191,31 @@ gitlab/
 
 ---
 
+## 卸载清理
+
+```bash
+# Omnibus RPM 卸载
+bash build/clean_gitlab.sh omnibus
+
+# Docker 卸载
+bash build/clean_gitlab.sh docker
+
+# 源码构建卸载（含 /home/git/* /usr/local/ruby /usr/local/go）
+bash build/clean_gitlab.sh source
+
+# 任意模式 + 删除数据目录 + 数据库 + git 用户
+bash build/clean_gitlab.sh source --data
+```
+
+| 模式 | 清理范围 |
+|------|---------|
+| `omnibus` | RPM 包 + /opt/gitlab + /var/opt/gitlab + /etc/gitlab |
+| `docker` | 容器 + 镜像 |
+| `source` | systemd 服务 + /home/git/* + /usr/local/ruby + /usr/local/go + Node 二进制 |
+| `--data` | 附加清理 /data/gitlab + 数据库 gitlabhq_production + git 用户 |
+
+---
+
 ## 离线部署
 
 ### 源码构建所需文件
