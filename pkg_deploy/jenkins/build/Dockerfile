@@ -64,28 +64,33 @@ RUN unzip -q /tmp/jenkins.zip -d /tmp/jenkins-src \
     # 修复 Windows CRLF（zip 打包可能带入）
     && find /tmp/jenkins-src -type f ! -name '*.jar' ! -name '*.gz' ! -name '*.zip' -exec sed -i 's/\r$//' {} \; 2>/dev/null || true
 
-# Node.js tarball → Maven 本地仓库缓存（避免 frontend-maven-plugin 在线下载失败）
-# build_image.sh 复制原始 node-v*.tar.gz 到构建上下文；不存在时为 node-v0.0.0-linux-x64.tar.gz 空占位
+# Node.js tarball（由 build_image.sh 复制到构建上下文，版本匹配则预填充缓存）
 COPY node-v*-linux-x64.tar.gz /tmp/
-RUN NODE_TAR=$(ls /tmp/node-v*-linux-x64.tar.gz 2>/dev/null | head -1) \
-    && if [ -s "${NODE_TAR}" ]; then \
-        NODE_VER=$(echo "$(basename "${NODE_TAR}")" | sed 's/node-v\([0-9.]*\)-.*/\1/') \
-        && echo "Node v${NODE_VER}: 预填充 Maven 缓存（跳过 download）" \
-        && mkdir -p /root/.m2/repository/com/github/eirslett/node/${NODE_VER} \
-        && cp "${NODE_TAR}" /root/.m2/repository/com/github/eirslett/node/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.gz; \
-    else \
-        echo "Node: 未提供离线包，Docker 内将尝试在线下载"; \
-    fi \
-    && rm -f /tmp/node-v*-linux-x64.tar.gz
 
 # 编译（-Pquick-build 官方快速构建 profile）
 # BuildKit cache mount 持久化 /root/.m2，避免重复下载依赖
 # 三级退化重试：在线 clean install → 在线 install → 离线 install -o
-# 去掉 --no-transfer-progress，保留 --batch-mode，让用户能看到进度
 RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
     mkdir -p /root/.m2 \
     && echo '<?xml version="1.0" encoding="UTF-8"?><settings><mirrors><mirror><id>huawei-maven</id><mirrorOf>*</mirrorOf><name>Huawei Maven Mirror</name><url>https://repo.huaweicloud.com/repository/maven/</url></mirror></mirrors></settings>' > /root/.m2/settings.xml \
     && cd /tmp/jenkins-src \
+    && echo ">>> 检查 frontend-maven-plugin Node 版本..." \
+    && POM_NODE="" \
+    && POM_NODE=$(find /tmp/jenkins-src -maxdepth 3 -name "pom.xml" -exec sed -n 's/.*<node\.version>v\{0,1\}\([0-9.]*\)<\/node\.version>.*/\1/p' {} \; 2>/dev/null | head -1) || true \
+    && [ -z "${POM_NODE}" ] && POM_NODE=$(find /tmp/jenkins-src -maxdepth 3 -name "pom.xml" -exec sed -n 's/.*<nodeVersion>v\{0,1\}\([0-9.]*\)<\/nodeVersion>.*/\1/p' {} \; 2>/dev/null | head -1) || true \
+    && NODE_TAR=$(ls /tmp/node-v*-linux-x64.tar.gz 2>/dev/null | head -1) \
+    && NODE_VER="" \
+    && [ -n "${NODE_TAR}" ] && [ -s "${NODE_TAR}" ] && NODE_VER=$(echo "$(basename "${NODE_TAR}")" | sed 's/node-v\([0-9.]*\)-.*/\1/') || true \
+    && if [ -n "${POM_NODE}" ] && [ "${POM_NODE}" = "${NODE_VER}" ]; then \
+        echo ">>> Node v${NODE_VER} 版本匹配，预填充 Maven 缓存" \
+        && mkdir -p /root/.m2/com/github/eirslett/node/${NODE_VER} \
+        && cp "${NODE_TAR}" /root/.m2/com/github/eirslett/node/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.gz; \
+    else \
+        echo ">>> Node: 本地=$(echo ${NODE_VER:-无}) POM要求=$(echo ${POM_NODE:-?}) → 跳过 frontend build（使用预编译前端资源）" \
+        && sed -i '/<artifactId>frontend-maven-plugin<\/artifactId>/,/<\/plugin>/{s|<configuration>|<configuration><skip>true</skip>|}' /tmp/jenkins-src/pom.xml; \
+    fi \
+    && rm -f /tmp/node-v*-linux-x64.tar.gz \
+    && echo "" \
     && MVN_OPTS="-pl war,bom -am \
         -Pquick-build \
         -Dmaven.buildNumber.skip=true \
