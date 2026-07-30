@@ -34,7 +34,7 @@ PAGES_REPO="https://gitlab.com/gitlab-org/gitlab-pages.git"
 #       本脚本仍保留 workhorse 独立编译（兼容旧版本）
 
 # ── 版本要求（GitLab 19.x） ──
-RUBY_VERSION="3.2.6"
+RUBY_VERSION="3.3.9"
 GO_VERSION="1.22.10"
 NODE_VERSION="20.18.0"
 
@@ -197,7 +197,7 @@ else
 fi
 
 # ═══════════════════════════════════════════════
-# 4. Ruby 3.2.x
+# 4. Ruby 3.3.x
 # ═══════════════════════════════════════════════
 step "[4/13] Ruby ${RUBY_VERSION}..."
 

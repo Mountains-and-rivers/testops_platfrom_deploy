@@ -75,14 +75,22 @@ RUN NODE_TAR=$(ls /tmp/node-v*-linux-x64.tar.gz 2>/dev/null | head -1) \
     && rm -f /tmp/node-v*-linux-x64.tar.gz
 
 # 编译（-Pquick-build 官方快速构建 profile，JDK 版本由 build_image.sh 自动匹配）
-RUN cd /tmp/jenkins-src \
-    && mvn -pl war,bom -am clean package \
+# 使用 BuildKit cache mount 持久化 Maven 本地仓库，避免每次重新下载依赖
+# 重试机制：首次下载依赖，重试用 -o 离线模式增量续跑
+RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
+    cd /tmp/jenkins-src \
+    && mvn_opts="-pl war,bom -am \
         -Pquick-build \
         -Dmaven.buildNumber.skip=true \
         -Dcheckstyle.skip=true \
-        --batch-mode --no-transfer-progress \
+        -Dmaven.repo.local=/root/.m2 \
+        -Djenkins.version=${JENKINS_VERSION} \
+        --batch-mode --no-transfer-progress" \
+    && (mvn ${mvn_opts} clean install \
+        || (echo "[RETRY] 首次失败，离线模式重试..." && mvn ${mvn_opts} install -o) \
+       ) \
     && cp war/target/jenkins.war /tmp/jenkins.war \
-    && cd / && rm -rf /tmp/jenkins-src /root/.m2
+    && cd / && rm -rf /tmp/jenkins-src
 
 # ─── Stage 2: 运行时 ──────────────────────────────────────
 FROM centos:stream9
