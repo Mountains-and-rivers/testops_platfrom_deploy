@@ -72,6 +72,11 @@ ok "WAR: ${JENKINS_WAR} ($(du -h "${JENKINS_WAR}" | cut -f1))"
 
 JAVA_BIN=$(_find_java) || die "Java 未安装，请先执行: bash build_jenkins.sh"
 JAVA_HOME="$(dirname "$(dirname "$(readlink -f "${JAVA_BIN}" 2>/dev/null || echo "${JAVA_BIN}")")")"
+
+# 安装字体（Jenkins 图表/界面渲染需要，否则 Fontconfig head is null）
+command -v dnf &>/dev/null && dnf install -y fontconfig dejavu-sans-fonts dejavu-serif-fonts 2>/dev/null || true
+command -v apt-get &>/dev/null && apt-get install -y -qq fontconfig fonts-dejavu 2>/dev/null || true
+ok "Fontconfig 已安装"
 export JAVA_HOME PATH="${JAVA_HOME}/bin:${PATH}"
 
 _jver=$("${JAVA_BIN}" -version 2>&1 | awk -F[\"_.] 'NR==1{print $2}')
