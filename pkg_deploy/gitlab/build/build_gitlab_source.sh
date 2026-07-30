@@ -102,7 +102,9 @@ if [ -f "${_SCRIPT_DIR}/centos.repo" ]; then
     info "  配置阿里云镜像: ${_SCRIPT_DIR}/centos.repo"
     cp /etc/yum.repos.d/centos.repo /etc/yum.repos.d/centos.repo.backup 2>/dev/null || true
     cp "${_SCRIPT_DIR}/centos.repo" /etc/yum.repos.d/centos.repo
-    dnf clean all     dnf makecache fi
+    dnf clean all
+    dnf makecache
+fi
 
 dnf install -y epel-release 2>/dev/null || true
 # CRB (CodeReady Builder): libyaml-devel / gdbm-devel 等在此仓库
@@ -187,7 +189,8 @@ else
         cd /tmp/gitaly-build
         [ -f Makefile ] || err "Gitaly Makefile 缺失，源码包不完整"
     else
-        git clone --depth 1 "${GITALY_REPO}" /tmp/gitaly-build     fi
+        git clone --depth 1 "${GITALY_REPO}" /tmp/gitaly-build
+    fi
     cd /tmp/gitaly-build
     make git GIT_PREFIX=/usr/local     cd /tmp; rm -rf /tmp/gitaly-build
     info "  ✓ Git $(git --version)"
@@ -360,7 +363,8 @@ elif load_source_tar "gitlab-foss" "${GITLAB_DIR}"; then
     chown -R git:git "${GITLAB_DIR}"
 else
     info "  git clone ${GITLAB_REPO} -b ${GITLAB_BRANCH}"
-    sudo -u git -H git clone --depth 1 "${GITLAB_REPO}" -b "${GITLAB_BRANCH}" "${GITLAB_DIR}" fi
+    sudo -u git -H git clone --depth 1 "${GITLAB_REPO}" -b "${GITLAB_BRANCH}" "${GITLAB_DIR}"
+fi
 [ -f "${GITLAB_DIR}/Gemfile" ] || err "GitLab 源码部署失败: ${GITLAB_DIR}/Gemfile 不存在"
 info "  ✓ ${GITLAB_DIR}"
 
@@ -451,7 +455,8 @@ if [ ! -d "vendor/bundle/ruby" ]; then
     sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle config set --local deployment 'true'
     sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle config set --local without 'development test kerberos'
     sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle config path "${GITLAB_DIR}/vendor/bundle"
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle install -j$(nproc)     info "  ✓ Gems 安装完成"
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle install -j$(nproc)
+    info "  ✓ Gems 安装完成"
 fi
 
 # ═══════════════════════════════════════════════
@@ -473,7 +478,8 @@ else
         chown -R git:git "${_GITALY_DST}"
     elif [ ! -f "${_GITALY_DST}/Makefile" ]; then
         info "  克隆 Gitaly..."
-        sudo -u git -H git clone --depth 1 "${GITALY_REPO}" "${_GITALY_DST}"     fi
+        sudo -u git -H git clone --depth 1 "${GITALY_REPO}" "${_GITALY_DST}"
+    fi
     cd "${_GITALY_DST}"
     info "  编译 Gitaly..."
     make 2>&1 || err "Gitaly 编译失败"
@@ -487,7 +493,8 @@ if [ -f "${_SHELL_DST}/bin/gitlab-shell" ] || [ -f "${_SHELL_DST}/Makefile" ]; t
 else
     info "  安装 gitlab-shell..."
     cd "${GITLAB_DIR}"
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:shell:install RAILS_ENV=production fi
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:shell:install RAILS_ENV=production
+fi
 
 # ── GitLab Workhorse ──
 if [ -f "${_WORKHORSE_DST}/gitlab-workhorse" ] && "${_WORKHORSE_DST}/gitlab-workhorse" -version &>/dev/null 2>&1; then
@@ -501,7 +508,8 @@ else
     elif [ ! -f "${_WORKHORSE_DST}/Makefile" ]; then
         cd "${GITLAB_DIR}"
         info "  安装 gitlab-workhorse..."
-        sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production         cd "${_WORKHORSE_DST}"
+        sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production
+        cd "${_WORKHORSE_DST}"
         make 2>&1 || true
     fi
     info "  ✓ gitlab-workhorse 就绪"

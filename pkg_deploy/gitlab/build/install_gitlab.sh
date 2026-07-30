@@ -85,8 +85,10 @@ case "${MODE}" in
 
         # 安装
         if command -v dnf &>/dev/null; then
-            dnf install -y "${GITLAB_PKG}"         else
-            dpkg -i "${GITLAB_PKG}"         fi
+            dnf install -y "${GITLAB_PKG}"
+        else
+            dpkg -i "${GITLAB_PKG}"
+        fi
         info "  ✓ RPM 已安装"
 
         # 配置 gitlab.rb
@@ -103,7 +105,8 @@ case "${MODE}" in
 
         # 启动
         step "[5/6] 启动 GitLab..."
-        gitlab-ctl start         info "  等待 GitLab 就绪..."
+        gitlab-ctl start
+        info "  等待 GitLab 就绪..."
 
         for i in $(seq 1 60); do
             if curl -sk --connect-timeout 3 "http://127.0.0.1:${GITLAB_PORT}/help" 2>/dev/null | grep -q 'GitLab'; then

@@ -207,8 +207,8 @@ UNIT_DIR="/etc/systemd/system"
 
 if [ -d "${SYSTEMD_SRC}" ]; then
     SERVICE_COUNT=0
-    for unit in "${SYSTEMD_SRC}"/*.service "${SYSTEMD_SRC}"/gitlab.target 2>/dev/null; do
-        [ -f "${unit}" ] || continue
+    for unit in "${SYSTEMD_SRC}"/*.service "${SYSTEMD_SRC}"/gitlab.target; do
+        [ -f "${unit}" ] 2>/dev/null || continue
         unit_name=$(basename "${unit}")
         if [ ! -f "${UNIT_DIR}/${unit_name}" ]; then
             cp "${unit}" "${UNIT_DIR}/${unit_name}"
