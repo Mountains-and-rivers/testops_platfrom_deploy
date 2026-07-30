@@ -29,7 +29,8 @@ bash uninstall_redis.sh --data
 | Redis | **7.4.1** |
 | 二进制包 | `redis-*.rpm`（本地通配匹配，不限定来源） |
 | 在线安装 | `dnf install redis` / `dnf module install redis:7` |
-| 兜底下载 | https://rpm.redis.io/（官方 RPM） |
+| 在线安装 | `dnf module install redis:7`（AppStream 7.2.x，API 兼容） |
+| 源码包 | https://download.redis.io/releases/redis-7.4.1.tar.gz |
 
 ---
 
@@ -37,7 +38,7 @@ bash uninstall_redis.sh --data
 
 ```
 [0/6] 已安装检测  →  版本一致则跳过
-[1/6] 安装 Redis  →  本地 *.rpm → dnf redis → dnf module redis:7 → rpm.redis.io
+[1/6] 安装 Redis  →  本地 *.rpm → dnf module redis:7 → dnf redis（版本检查）
 [2/6] 配置        →  redis.conf（AOF + RDB + 密码）
 [3/6] systemd     →  enable（开机自启）+ start
 [4/6] 设置密码    →  requirepass 验证

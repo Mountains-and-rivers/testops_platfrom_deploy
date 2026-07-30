@@ -41,15 +41,27 @@ pkill -9 postgres 2>/dev/null || true
 sleep 2
 
 step "[2/5] 移除 RPM..."
-# 卸载所有可能的 PG RPM
-for pkg in postgresql17-server postgresql17 postgresql17-libs \
-           postgresql16-server postgresql16 postgresql16-libs; do
-    rpm -e "${pkg}" 2>/dev/null && info "  ${pkg} 已移除" || true
+# 先清除 RPM 包再删目录，避免 RPM 数据库不一致
+for pkg in postgresql17-server postgresql17 postgresql17-libs postgresql17-contrib \
+           postgresql16-server postgresql16 postgresql16-libs postgresql16-contrib; do
+    if rpm -q "${pkg}" &>/dev/null 2>&1; then
+        rpm -e --nodeps "${pkg}" 2>/dev/null && info "  ${pkg} 已移除" \
+            || warn "  ${pkg} 移除失败（可能已卸载）"
+    fi
 done
 
 step "[3/5] 清理安装目录..."
-rm -rf /usr/pgsql-16 /usr/pgsql-17 /usr/local/postgresql 2>/dev/null || true
-info "  安装目录已清理"
+# 只在 RPM 卸载后才删目录
+for d in /usr/pgsql-16 /usr/pgsql-17; do
+    if [ -d "${d}" ]; then
+        # 二次确认：该目录不应再有 RPM 包引用
+        if rpm -qa 2>/dev/null | grep -q "$(basename ${d})"; then
+            warn "  ${d} 仍有 RPM 残留，跳过删除"
+        else
+            rm -rf "${d}" && info "  ${d} 已清理"
+        fi
+    fi
+done
 
 step "[4/5] 清理日志 & 缓存 & PID..."
 rm -rf /var/log/postgresql /tmp/build-cache/postgresql*.rpm /tmp/build-cache/postgresql*.tar.gz 2>/dev/null || true

@@ -12,8 +12,10 @@ cd /tmp
 
 # ── 配置 ──
 REDIS_VERSION="7.4.1"
+# 源码包（预留源码编译模式使用）
+REDIS_SOURCE_URL="https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz"
+# CentOS 9 AppStream redis:7 模块提供 7.2.x（与 7.4.x API 兼容）
 # 本地 RPM 通配匹配（redis-*.rpm），不硬编码具体文件名
-REDIS_OFFICIAL_RPM="https://rpm.redis.io/redis-${REDIS_VERSION}-1.el9.x86_64.rpm"
 REDIS_PASSWORD="${REDIS_PASSWORD:-Pg1@zendao2024}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/redis}"
@@ -46,7 +48,7 @@ get_local() {
 
 echo "============================================"
 echo "  Redis ${REDIS_VERSION} 单机部署（CentOS 9）"
-echo "  方式: 二进制 RPM（Remi） |  端口: ${REDIS_PORT}"
+echo "  方式: dnf module redis:7 / 本地 RPM |  端口: ${REDIS_PORT}"
 echo "============================================"
 
 # ═══ 0. 已安装检测 ═══
@@ -113,21 +115,22 @@ if [ -n "${LOCAL_RPM}" ] && [ -s "${LOCAL_RPM}" ]; then
     }
 
 elif command -v dnf &>/dev/null; then
-    # ── dnf 在线安装 ──
-    info "  本地 RPM 不存在，尝试 dnf 在线安装..."
-    if dnf install -y redis 2>&1; then
-        info "  ✓ dnf 安装完成"
-    elif dnf module install -y redis:7 2>&1; then
+    # ── 在线安装：dnf module redis:7（AppStream 提供 7.2.x，API 兼容 7.4.x）──
+    info "  本地 RPM 不存在，在线安装 Redis 7.x..."
+    if dnf module install -y redis:7 2>&1; then
         info "  ✓ dnf module redis:7 安装完成"
+    elif dnf install -y redis 2>&1; then
+        # 兜底：检查版本是否是 7.x
+        REDIS_VER=$(${INSTALL_DIR}/bin/redis-server --version 2>&1 | awk '{print $3}' | cut -d= -f2)
+        if echo "${REDIS_VER}" | grep -qE '^7\.'; then
+            info "  ✓ dnf 安装 Redis ${REDIS_VER}"
+        else
+            warn "  安装了 Redis ${REDIS_VER}（非 7.x）！"
+            warn "  请手动下载 redis-7.x RPM 放到 ${SCRIPT_DIR}/ 后重试"
+            warn "  源码包: ${REDIS_SOURCE_URL}"
+        fi
     else
-        # ── 官方 Redis RPM 兜底 ──
-        warn "  dnf 均失败，尝试官方 Redis RPM..."
-        info "  下载: ${REDIS_OFFICIAL_RPM}"
-        wget -q --show-progress -O "/tmp/redis.rpm" "${REDIS_OFFICIAL_RPM}" 2>/dev/null \
-            || curl -L -o "/tmp/redis.rpm" "${REDIS_OFFICIAL_RPM}" \
-            || err "下载失败，请手动下载 redis RPM 放到 ${SCRIPT_DIR}/"
-        rpm -ivh "/tmp/redis.rpm" 2>&1 || err "RPM 安装失败"
-        rm -f "/tmp/redis.rpm"
+        err "所有在线安装方式均失败，请手动下载 redis RPM 放到 ${SCRIPT_DIR}/"
     fi
 
 else
@@ -303,6 +306,6 @@ echo "============================================"
 
 # ═══════════════════════════════════════════════
 # TODO: 源码编译模式（TLS 等高级选项）
-#   - [ ] redis-${REDIS_VERSION}.tar.gz → make BUILD_TLS=yes → make install
+#   - [ ] ${REDIS_SOURCE_URL} → make BUILD_TLS=yes → make install
 #   - [ ] 参考: build_redis_source.sh (待实现)
 # ═══════════════════════════════════════════════

@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================
-# PostgreSQL 16.8 — 裸机单机部署（CentOS 9）
+# PostgreSQL 17.4 — 裸机单机部署（CentOS 9）
 #
 # 安装方式: 二进制 RPM（PGDG 官方仓库）/ 源码编译（TODO）
-# 包名:     postgresql17-{server,libs}-16.8-1PGDG.rhel9.x86_64.rpm
+# 包名:     postgresql17-{server,libs}-17.4-1PGDG.rhel9.x86_64.rpm
 # 本地优先: 脚本同目录 → /tmp/build-cache/（3 个 rpm 缺一不可）
 #
 # 用法:     bash install_postgresql.sh [--port 5432] [--password Pg1@zendao2024]
@@ -69,6 +69,16 @@ systemctl stop postgresql 2>/dev/null || true
 
 # ═══ 1. 安装 RPM ═══
 step "[1/6] 安装 RPM..."
+
+# 检测 stale RPM 状态：RPM 数据库认为已安装但文件缺失
+# （可能因卸载脚本 kill 后残留造成）
+for _pkg in postgresql${PG_MAJOR} postgresql${PG_MAJOR}-libs postgresql${PG_MAJOR}-server; do
+    if rpm -q "${_pkg}" &>/dev/null 2>&1 && [ ! -f "${INSTALL_DIR}/bin/postgres" ]; then
+        warn "  检测到 ${_pkg} RPM 残留（文件缺失），强制清理..."
+        rpm -e --nodeps postgresql${PG_MAJOR}-server postgresql${PG_MAJOR} postgresql${PG_MAJOR}-libs 2>/dev/null || true
+        break
+    fi
+done
 
 RPM_LIST=("${PG_RPM_LIBS}" "${PG_RPM_CLIENT}" "${PG_RPM_SERVER}")
 ALL_LOCAL=true

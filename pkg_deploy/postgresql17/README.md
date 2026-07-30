@@ -1,4 +1,4 @@
-# PostgreSQL 16.8 — 单机部署
+# PostgreSQL 17.4 — 单机部署
 
 > 二进制 RPM（PGDG）安装 / 源码编译（TODO）
 
@@ -26,17 +26,17 @@ bash uninstall_postgresql.sh --data
 
 | 项目 | 值 |
 |------|-----|
-| PostgreSQL | **16.8** |
+| PostgreSQL | **17.4** |
 | 二进制包 | PGDG 官方 RPM × 3 |
-| 下载地址 | https://download.postgresql.org/pub/repos/yum/16/redhat/rhel-9-x86_64/ |
+| 下载地址 | https://download.postgresql.org/pub/repos/yum/17/redhat/rhel-9-x86_64/ |
 
 ### 离线包清单
 
 | 文件 | 大小 |
 |------|------|
-| `postgresql17-libs-16.8-1PGDG.rhel9.x86_64.rpm` | ~335K |
-| `postgresql17-16.8-1PGDG.rhel9.x86_64.rpm` | ~1.8M |
-| `postgresql17-server-16.8-1PGDG.rhel9.x86_64.rpm` | ~6.8M |
+| `postgresql17-libs-17.4-1PGDG.rhel9.x86_64.rpm` | ~335K |
+| `postgresql17-17.4-1PGDG.rhel9.x86_64.rpm` | ~1.8M |
+| `postgresql17-server-17.4-1PGDG.rhel9.x86_64.rpm` | ~6.8M |
 
 ---
 
@@ -56,11 +56,11 @@ bash uninstall_postgresql.sh --data
 
 ```
 --- 服务状态 ---
-● postgresql-16.service - PostgreSQL 16.8
+● postgresql.service - PostgreSQL 17.4
    Active: active (running)
 
 ============================================
-  PostgreSQL 16.8 安装完成
+  PostgreSQL 17.4 安装完成
 
   ── 账号信息 ──
   用户名: postgres
@@ -78,8 +78,8 @@ bash uninstall_postgresql.sh --data
   PGPASSWORD='Pg1@zendao2024' psql -U postgres -h 127.0.0.1 -p 5432
 
   ── 管理命令 ──
-  systemctl status postgresql-16
-  systemctl {start|stop|restart|reload} postgresql-16
+  systemctl status postgresql
+  systemctl {start|stop|restart|reload} postgresql
 ============================================
 ```
 
@@ -93,9 +93,9 @@ postgresql17/
 ├── README.md
 ├── install_postgresql.sh                          # 安装脚本
 ├── uninstall_postgresql.sh                        # 清理脚本
-├── postgresql17-libs-16.8-1PGDG.rhel9.x86_64.rpm  # 本地离线包
-├── postgresql17-16.8-1PGDG.rhel9.x86_64.rpm
-└── postgresql17-server-16.8-1PGDG.rhel9.x86_64.rpm
+├── postgresql17-libs-17.4-1PGDG.rhel9.x86_64.rpm  # 本地离线包
+├── postgresql17-17.4-1PGDG.rhel9.x86_64.rpm
+└── postgresql17-server-17.4-1PGDG.rhel9.x86_64.rpm
 ```
 
 ---
@@ -116,13 +116,13 @@ postgresql17/
 
 | 配置项 | 值 |
 |--------|-----|
-| 安装路径 | `/usr/pgsql-16` |
+| 安装路径 | `/usr/pgsql` |
 | 监听地址 | `*`（所有网卡） |
 | 最大连接 | 200 |
 | shared_buffers | 256MB |
 | 远程认证 | `md5`（0.0.0.0/0） |
 | 编码 | UTF8 |
-| 开机自启 | `systemctl enable postgresql-16` |
+| 开机自启 | `systemctl enable postgresql` |
 | 默认数据库 | `zendao` |
 | postgres 密码 | `Pg1@zendao2024` |
 
@@ -141,12 +141,12 @@ postgresql17/
 ## 管理命令
 
 ```bash
-systemctl start postgresql-16        # 启动
-systemctl stop postgresql-16         # 停止
-systemctl restart postgresql-16      # 重启
-systemctl status postgresql-16       # 状态
-systemctl is-enabled postgresql-16   # 是否开机自启
-journalctl -u postgresql-16 -f       # 日志
+systemctl start postgresql        # 启动
+systemctl stop postgresql         # 停止
+systemctl restart postgresql      # 重启
+systemctl status postgresql       # 状态
+systemctl is-enabled postgresql   # 是否开机自启
+journalctl -u postgresql -f       # 日志
 
 # 连接 — 三种方式
 sudo -u postgres psql                                            # 本地 socket（免密）
@@ -178,5 +178,5 @@ CREATE DATABASE gitlabhq_production OWNER git;
 
 ## TODO
 
-- [ ] 源码编译模式：`postgresql-16.8.tar.gz → ./configure → make → make install`
+- [ ] 源码编译模式：`postgresql.4.tar.gz → ./configure → make → make install`
 - [ ] 集群模式：Patroni + etcd 高可用
