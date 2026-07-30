@@ -1,10 +1,10 @@
 #!/bin/bash
 # ============================================================
-# PostgreSQL 16.8 — 裸机单机部署
+# PostgreSQL 16.8 — 裸机单机部署（CentOS 9）
 #
-# 安装方式: 二进制 tar.gz（已实现） / 源码编译（TODO）
-# 包名:     postgresql-16.8-1-linux-x64-binaries.tar.gz
-# 下载:     https://get.enterprisedb.com/postgresql/
+# 安装方式: 二进制 RPM（PGDG 官方仓库）/ 源码编译（TODO）
+# 包名:     postgresql16-{server,libs}-16.8-1PGDG.rhel9.x86_64.rpm
+# 下载:     https://download.postgresql.org/pub/repos/yum/16/redhat/rhel-9-x86_64/
 # 本地优先: 脚本同目录 → /tmp/build-cache/
 #
 # 用法:     bash install_postgresql.sh [--port 5432] [--password Pg1@zendao2024]
@@ -14,12 +14,15 @@ cd /tmp
 
 # ── 配置 ──
 PG_VERSION="16.8"
-PG_BIN="postgresql-${PG_VERSION}-1-linux-x64-binaries.tar.gz"
-PG_BIN_URL="https://get.enterprisedb.com/postgresql/postgresql-${PG_VERSION}-1-linux-x64-binaries.tar.gz"
+PG_MAJOR="16"
+PG_RPM_SERVER="postgresql${PG_MAJOR}-server-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
+PG_RPM_CLIENT="postgresql${PG_MAJOR}-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
+PG_RPM_LIBS="postgresql${PG_MAJOR}-libs-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
+PG_RPM_BASE="https://download.postgresql.org/pub/repos/yum/${PG_MAJOR}/redhat/rhel-9-x86_64"
 PG_ROOT_PASSWORD='Pg1@zendao2024'
 PG_DATABASE="zendao"
 PG_PORT="${PG_PORT:-5432}"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/postgresql}"
+INSTALL_DIR="/usr/pgsql-${PG_MAJOR}"
 DATA_DIR="${DATA_DIR:-/data/postgresql}"
 LOG_DIR="${LOG_DIR:-/var/log/postgresql}"
 
@@ -47,62 +50,116 @@ get_local() {
     return 1
 }
 
+# 本地加载所有 RPM，缺少任一个则返回 1
+load_all_rpms() {
+    local missing=0
+    for rpm in "$@"; do
+        local f
+        f=$(get_local "${rpm}") && info "  使用本地: $(basename ${f}) ($(du -h ${f} | cut -f1))" || {
+            warn "  缺少: ${rpm}"; missing=1
+        }
+    done
+    return ${missing}
+}
+
 echo "============================================"
-echo "  PostgreSQL ${PG_VERSION} 单机部署"
-echo "  方式: 二进制 tar.gz  |  端口: ${PG_PORT}"
-echo "  安装: ${INSTALL_DIR}  |  数据: ${DATA_DIR}"
+echo "  PostgreSQL ${PG_VERSION} 单机部署（CentOS 9）"
+echo "  方式: 二进制 RPM（PGDG） |  端口: ${PG_PORT}"
+echo "  安装: ${INSTALL_DIR}      |  数据: ${DATA_DIR}"
 echo "============================================"
 
 # ═══ 0. 已安装检测 ═══
 step "[0/6] 检查已安装..."
-if [ -f "${INSTALL_DIR}/bin/postgres" ]; then
+if [ -f "${INSTALL_DIR}/bin/postgres" ] && ${INSTALL_DIR}/bin/postgres --version &>/dev/null 2>&1; then
     ver=$(${INSTALL_DIR}/bin/postgres --version 2>&1 | awk '{print $3}')
-    info "  已安装 PostgreSQL ${ver}"
+    info "  已安装 PostgreSQL ${ver} (${INSTALL_DIR})"
+    systemctl is-active postgresql &>/dev/null || systemctl start postgresql 2>/dev/null || true
+    info "  跳过安装"; exit 0
+fi
+# 也检查 dnf 安装的
+if command -v postgres &>/dev/null && postgres --version 2>&1 | grep -q "${PG_VERSION}"; then
+    info "  已安装 PostgreSQL ${PG_VERSION} (dnf)"
     systemctl is-active postgresql &>/dev/null || systemctl start postgresql 2>/dev/null || true
     info "  跳过安装"; exit 0
 fi
 systemctl stop postgresql 2>/dev/null || true
 pkill -9 postgres 2>/dev/null || true; sleep 1
 
-# ═══ 1. 获取二进制包 ═══
-step "[1/6] 获取二进制包..."
+# ═══ 1. 获取二进制 RPM 包 ═══
+step "[1/6] 获取二进制 RPM 包..."
 
-if pkg=$(get_local "${PG_BIN}"); then
-    info "  使用本地: $(basename ${pkg}) ($(du -h ${pkg} | cut -f1))"
-    cp "${pkg}" "/tmp/${PG_BIN}"
+RPM_LIST=("${PG_RPM_LIBS}" "${PG_RPM_CLIENT}" "${PG_RPM_SERVER}")
+
+if load_all_rpms "${RPM_LIST[@]}"; then
+    info "  ✓ 全部 3 个 RPM 本地就绪"
+    USE_LOCAL=true
 else
-    info "  下载: ${PG_BIN_URL}"
-    for i in 1 2 3; do
-        wget -q --show-progress -O "/tmp/${PG_BIN}" "${PG_BIN_URL}" 2>/dev/null \
-            || curl -L -o "/tmp/${PG_BIN}" "${PG_BIN_URL}" \
-            && break
-        warn "  重试 (${i}/3)"; sleep 5
-    done
-    [ -f "/tmp/${PG_BIN}" ] && [ -s "/tmp/${PG_BIN}" ] || err "下载失败，请手动下载放到 ${SCRIPT_DIR}/"
+    info "  尝试 dnf 在线安装..."
+    if command -v dnf &>/dev/null; then
+        dnf install -y "https://download.postgresql.org/pub/repos/yum/${PG_MAJOR}/redhat/rhel-9-x86_64/postgresql${PG_MAJOR}-server-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm" 2>/dev/null && {
+            info "  ✓ dnf 安装完成"
+            DNF_INSTALL=true
+        } || USE_DOWNLOAD=true
+    else
+        USE_DOWNLOAD=true
+    fi
 fi
-mkdir -p /tmp/build-cache && cp "/tmp/${PG_BIN}" "/tmp/build-cache/${PG_BIN}" 2>/dev/null || true
-info "  ✓ ${PG_BIN}"
 
-# ═══ 2. 安装 ═══
-step "[2/6] 安装..."
+if [ "${USE_DOWNLOAD:-false}" = true ]; then
+    mkdir -p /tmp/pg-rpms
+    for rpm in "${RPM_LIST[@]}"; do
+        if pkg=$(get_local "${rpm}"); then
+            cp "${pkg}" "/tmp/pg-rpms/${rpm}"
+        else
+            RPM_URL="${PG_RPM_BASE}/${rpm}"
+            info "  下载: ${RPM_URL}"
+            for i in 1 2 3; do
+                wget -q --show-progress -P /tmp/pg-rpms "${RPM_URL}" 2>/dev/null \
+                    || curl -L -o "/tmp/pg-rpms/${rpm}" "${RPM_URL}" \
+                    && break
+                warn "  重试 (${i}/3)"; sleep 5
+            done
+            [ -f "/tmp/pg-rpms/${rpm}" ] && [ -s "/tmp/pg-rpms/${rpm}" ] || err "下载失败: ${rpm}"
+        fi
+        # 缓存
+        cp "/tmp/pg-rpms/${rpm}" "/tmp/build-cache/${rpm}" 2>/dev/null || true
+    done
+    info "  ✓ 3 个 RPM 已就绪"
+fi
 
-rm -rf /tmp/pg-bin "${INSTALL_DIR}"
-mkdir -p /tmp/pg-bin
-tar -xzf "/tmp/${PG_BIN}" -C /tmp/pg-bin --strip-components=1
-mv /tmp/pg-bin "${INSTALL_DIR}"
-rm -f "/tmp/${PG_BIN}"
-info "  ✓ ${INSTALL_DIR}/bin/postgres ($(${INSTALL_DIR}/bin/postgres --version 2>&1))"
+# ═══ 2. 安装 RPM ═══
+step "[2/6] 安装 RPM..."
+
+if [ -n "${DNF_INSTALL:-}" ]; then
+    info "  ✓ 已通过 dnf 安装"
+elif [ -d /tmp/pg-rpms ]; then
+    rpm -ivh /tmp/pg-rpms/*.rpm 2>&1 || {
+        warn "  rpm -ivh 失败，尝试 dnf localinstall..."
+        dnf localinstall -y /tmp/pg-rpms/*.rpm 2>&1 || err "RPM 安装失败"
+    }
+    rm -rf /tmp/pg-rpms
+fi
+
+# 验证安装
+[ -f "${INSTALL_DIR}/bin/postgres" ] || err "安装失败: ${INSTALL_DIR}/bin/postgres 不存在"
+info "  ✓ PostgreSQL $(${INSTALL_DIR}/bin/postgres --version 2>&1)"
 
 # ═══ 3. 初始化数据库 ═══
 step "[3/6] 初始化数据库..."
 
-id postgres &>/dev/null || { groupadd postgres; useradd -r -g postgres -s /bin/false postgres; }
+id postgres &>/dev/null || { groupadd postgres 2>/dev/null || true; useradd -r -g postgres -s /bin/false postgres 2>/dev/null || true; }
 mkdir -p "${DATA_DIR}" "${LOG_DIR}"
 chown -R postgres:postgres "${DATA_DIR}" "${LOG_DIR}"
 
-export PATH="${INSTALL_DIR}/bin:${PATH}"
-su - postgres -c "${INSTALL_DIR}/bin/initdb -D ${DATA_DIR} --encoding=UTF8 --locale=en_US.UTF-8" 
-# 写入 postgresql.conf
+# 检查是否已初始化
+if [ -f "${DATA_DIR}/PG_VERSION" ]; then
+    info "  ✓ 数据目录已初始化"
+else
+    su - postgres -c "${INSTALL_DIR}/bin/initdb -D ${DATA_DIR} --encoding=UTF8 --locale=en_US.UTF-8" 2>&1
+    info "  ✓ initdb 完成"
+fi
+
+# 写入 postgresql.conf（增量，避免覆盖已有配置）
 cat >> "${DATA_DIR}/postgresql.conf" << CONF
 listen_addresses = '*'
 port = ${PG_PORT}
@@ -113,10 +170,11 @@ log_directory = '${LOG_DIR}'
 log_filename = 'postgresql-%a.log'
 CONF
 
-# 允许远程连接
-echo "host all all 0.0.0.0/0 md5" >> "${DATA_DIR}/pg_hba.conf"
+# 允许远程连接（检查是否已存在）
+grep -q "^host all all 0.0.0.0/0" "${DATA_DIR}/pg_hba.conf" 2>/dev/null \
+    || echo "host all all 0.0.0.0/0 md5" >> "${DATA_DIR}/pg_hba.conf"
 chown -R postgres:postgres "${DATA_DIR}"
-info "  ✓ 初始化完成"
+info "  ✓ 配置完成"
 
 # ═══ 4. systemd ═══
 step "[4/6] 配置 systemd..."
@@ -142,11 +200,11 @@ systemctl daemon-reload
 systemctl enable postgresql
 systemctl start postgresql
 sleep 2
-systemctl is-active postgresql &>/dev/null || err "PostgreSQL 启动失败"
+systemctl is-active postgresql &>/dev/null || err "PostgreSQL 启动失败，检查: journalctl -u postgresql -n 20"
 info "  ✓ 服务已启动"
 
 # ═══ 5. 功能验证 ═══
-step "[5/6] 功能验证..."
+step "[5/6] 功能验证 + 设置密码..."
 
 PASS=0
 
@@ -159,16 +217,21 @@ if command -v ss &>/dev/null; then
         || warn "  ✗ 端口 ${PG_PORT} 未监听"
 fi
 
-# 3) 数据库连接检查
-su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${PG_ROOT_PASSWORD}';\"" 2>/dev/null && PASS=$((PASS+1))
-su - postgres -c "psql -c \"CREATE DATABASE ${PG_DATABASE};\" 2>/dev/null" || true
+# 3) 设置 postgres 密码
+su - postgres -c "psql -c \"ALTER USER postgres PASSWORD '${PG_ROOT_PASSWORD}';\"" 2>/dev/null \
+    && { info "  ✓ postgres 密码已设置"; PASS=$((PASS+1)); } \
+    || warn "  ✗ 密码设置异常（可能已设置）"
 
-# 4) 连接验证
-if su - postgres -c "psql -tAc 'SELECT version();'" 2>/dev/null | grep -q PostgreSQL; then
-    info "  ✓ 数据库连接正常"
+# 4) 创建数据库
+su - postgres -c "psql -c \"CREATE DATABASE ${PG_DATABASE};\" 2>/dev/null" || true
+info "  数据库 ${PG_DATABASE} 已就绪"
+
+# 5) 连接验证
+if PGPASSWORD="${PG_ROOT_PASSWORD}" ${INSTALL_DIR}/bin/psql -U postgres -h 127.0.0.1 -p ${PG_PORT} -tAc 'SELECT version();' 2>/dev/null | grep -q PostgreSQL; then
+    info "  ✓ 远程连接正常"
     PASS=$((PASS+1))
 else
-    warn "  ✗ 数据库连接异常"
+    warn "  ✗ 远程连接异常（检查 pg_hba.conf 和密码）"
 fi
 
 # 防火墙
@@ -182,6 +245,8 @@ echo "  PostgreSQL ${PG_VERSION} 安装完成"
 echo "  连接:   psql -U postgres -h 127.0.0.1 -p ${PG_PORT}"
 echo "  密码:   ${PG_ROOT_PASSWORD}"
 echo "  数据库: ${PG_DATABASE}"
+echo "  安装:   ${INSTALL_DIR}"
+echo "  数据:   ${DATA_DIR}"
 echo "  管理:   systemctl {start|stop|restart|status} postgresql"
 echo "  卸载:   bash uninstall_postgresql.sh"
 echo "============================================"

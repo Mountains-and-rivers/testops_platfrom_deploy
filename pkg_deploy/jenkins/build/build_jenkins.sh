@@ -219,22 +219,30 @@ _gen_maven_settings() {
       <name>Aliyun Maven</name>
       <url>https://maven.aliyun.com/repository/public</url>
     </mirror>
+    <mirror>
+      <id>huawei-jenkins</id>
+      <mirrorOf>repo.jenkins-ci.org</mirrorOf>
+      <name>Huawei Maven (Jenkins)</name>
+      <url>https://repo.huaweicloud.com/repository/maven/</url>
+    </mirror>
   </mirrors>
   <profiles>
     <profile>
-      <id>aliyun</id>
+      <id>china-mirrors</id>
       <repositories>
         <repository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository>
+        <repository><id>repo.jenkins-ci.org</id><url>https://repo.huaweicloud.com/repository/maven/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository>
       </repositories>
       <pluginRepositories>
         <pluginRepository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository>
+        <pluginRepository><id>repo.jenkins-ci.org</id><url>https://repo.huaweicloud.com/repository/maven/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository>
       </pluginRepositories>
     </profile>
   </profiles>
-  <activeProfiles><activeProfile>aliyun</activeProfile></activeProfiles>
+  <activeProfiles><activeProfile>china-mirrors</activeProfile></activeProfiles>
 </settings>
 XMLEOF
-    info "  Maven 镜像: aliyun"
+    info "  Maven 镜像: aliyun(central) + huawei(repo.jenkins-ci.org)"
 }
 
 # ── 获取源码 ─────────────────────────────────────────────

@@ -26,7 +26,8 @@ systemctl daemon-reload 2>/dev/null || true
 info "  服务已停止"
 
 step "[2/4] 删除安装目录..."
-rm -rf /usr/local/postgresql 2>/dev/null || true
+rm -rf /usr/local/postgresql /usr/pgsql-16 2>/dev/null || true
+rpm -e postgresql16-server postgresql16 postgresql16-libs 2>/dev/null || true
 info "  安装目录已清理"
 
 step "[3/4] 删除用户..."
