@@ -119,8 +119,8 @@ dnf install -y --setopt=tsflags=nodocs \
     libcurl-devel expat-devel pcre2-devel \
     libyaml-devel libffi-devel gdbm-devel re2-devel \
     ncurses-devel perl perl-Image-ExifTool \
-    GraphicsMagick postfix logrotate rsync \
-    info "  ✓ 编译工具链就绪"
+    GraphicsMagick postfix logrotate rsync
+info "  ✓ 编译工具链就绪"
 
 # ═══════════════════════════════════════════════
 # 2. 离线包完整性检查
