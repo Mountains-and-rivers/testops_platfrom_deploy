@@ -56,7 +56,7 @@ load_source_tar() {
     local name="$1" dest="$2"
     for d in "${_SCRIPT_DIR}/" "/tmp/build-cache/"; do
         local f
-        f=$(ls "${d}/${name}-"*.tar.xz 2>/dev/null | head -1)
+        f=$(ls "${d}/${name}-"*.tar.xz 2>/dev/null | head -1) || true
         if [ -n "${f}" ] && [ -s "${f}" ]; then
             info "  解压本地: $(basename ${f}) ($(du -h ${f} | cut -f1))"
             mkdir -p "${dest}"
@@ -131,7 +131,7 @@ MISSING=0
 check_pkg() {
     local pattern="$1" desc="$2" url="$3"
     local found
-    found=$(ls "${_SCRIPT_DIR}/"${pattern} 2>/dev/null | head -1)
+    found=$(ls "${_SCRIPT_DIR}/"${pattern} 2>/dev/null | head -1) || true
     if [ -n "${found}" ] && [ -s "${found}" ]; then
         info "  ✓ $(basename ${found}) ($(du -h "${found}" | cut -f1))"
     else
