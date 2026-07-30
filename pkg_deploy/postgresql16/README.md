@@ -44,12 +44,43 @@ bash uninstall_postgresql.sh --data
 
 ```
 [0/6] 已安装检测  →  版本一致则跳过
-[1/6] 获取 RPM    →  本地目录（3 个 rpm 缺一不可）→ dnf 在线
-[2/6] 安装 RPM    →  rpm -ivh / dnf localinstall
-[3/6] 初始化      →  initdb + postgresql.conf + pg_hba.conf
-[4/6] systemd     →  enable（开机自启）+ start
-[5/6] 功能验证    →  进程 + 端口 + 密码 + 连接测试
-[6/6] 完成
+[1/6] 安装 RPM    →  本地 3 个 rpm → dnf 在线
+[2/6] 初始化      →  initdb + postgresql.conf + pg_hba.conf
+[3/6] systemd     →  enable（开机自启）+ start
+[4/6] 设置密码    →  ALTER USER postgres PASSWORD
+[5/6] 功能验证    →  进程 + 端口 + socket 连接 + TCP 密码连接
+[6/6] 完成        →  进程状态 + 账号信息 + 连接命令
+```
+
+### 安装完成输出示例
+
+```
+--- 服务状态 ---
+● postgresql-16.service - PostgreSQL 16.8
+   Active: active (running)
+
+============================================
+  PostgreSQL 16.8 安装完成
+
+  ── 账号信息 ──
+  用户名: postgres
+  密码:   Pg1@zendao2024
+  数据库: zendao
+
+  ── 连接命令 ──
+  # 本地 socket 连接（免密）
+  sudo -u postgres psql
+
+  # TCP 密码连接
+  psql -U postgres -h 127.0.0.1 -p 5432
+
+  # 环境变量方式
+  PGPASSWORD='Pg1@zendao2024' psql -U postgres -h 127.0.0.1 -p 5432
+
+  ── 管理命令 ──
+  systemctl status postgresql-16
+  systemctl {start|stop|restart|reload} postgresql-16
+============================================
 ```
 
 ---
@@ -91,7 +122,7 @@ postgresql16/
 | shared_buffers | 256MB |
 | 远程认证 | `md5`（0.0.0.0/0） |
 | 编码 | UTF8 |
-| 开机自启 | `systemctl enable postgresql` |
+| 开机自启 | `systemctl enable postgresql-16` |
 | 默认数据库 | `zendao` |
 | postgres 密码 | `Pg1@zendao2024` |
 
@@ -110,15 +141,17 @@ postgresql16/
 ## 管理命令
 
 ```bash
-systemctl start postgresql        # 启动
-systemctl stop postgresql         # 停止
-systemctl restart postgresql      # 重启
-systemctl status postgresql       # 状态
-systemctl is-enabled postgresql   # 是否开机自启
-journalctl -u postgresql -f       # 日志
+systemctl start postgresql-16        # 启动
+systemctl stop postgresql-16         # 停止
+systemctl restart postgresql-16      # 重启
+systemctl status postgresql-16       # 状态
+systemctl is-enabled postgresql-16   # 是否开机自启
+journalctl -u postgresql-16 -f       # 日志
 
-# 连接
-psql -U postgres -h 127.0.0.1 -p 5432
+# 连接 — 三种方式
+sudo -u postgres psql                                            # 本地 socket（免密）
+psql -U postgres -h 127.0.0.1 -p 5432                            # TCP 密码连接
+PGPASSWORD='Pg1@zendao2024' psql -U postgres -h 127.0.0.1 -p 5432  # 环境变量
 ```
 
 ## 卸载

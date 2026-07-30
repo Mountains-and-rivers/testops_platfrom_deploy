@@ -16,6 +16,9 @@
 #   harbor.testops.local/testops/jenkins:2.479.1
 #   harbor.testops.local/testops/jenkins:latest
 # ============================================================
+# 强制使用 bash（sh/dash 不支持 pipefail）
+[ -z "${BASH_VERSION:-}" ] && exec bash "$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")" "$@"
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "$(pwd)")"

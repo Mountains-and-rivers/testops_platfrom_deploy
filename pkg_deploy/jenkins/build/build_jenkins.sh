@@ -14,6 +14,10 @@
 #   bash install_jenkins.sh                  # 裸机 systemd 部署
 #   bash build_image.sh --prebuilt           # Docker 镜像构建
 # ============================================================
+
+# 强制使用 bash（sh/dash 不支持 pipefail）
+[ -z "${BASH_VERSION:-}" ] && exec bash "$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")" "$@"
+
 set -euo pipefail
 
 # ── 脚本目录 ─────────────────────────────────────────────
