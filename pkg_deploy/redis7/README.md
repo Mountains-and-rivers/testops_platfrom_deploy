@@ -1,13 +1,13 @@
 # Redis 7.4.1 — 单机部署
 
-> 二进制 RPM 安装（dnf/Remi），快速编译回退
+> 二进制 RPM（Remi）安装 / 源码编译（TODO）
 
 ---
 
 ## 一键执行
 
 ```bash
-# 安装（二进制 RPM / dnf 优先，本地包优先）
+# 安装（本地 RPM 优先）
 bash install_redis.sh
 
 # 指定端口和密码
@@ -16,7 +16,7 @@ bash install_redis.sh --port 6379 --password MyPass123
 # 卸载（保留 /data/redis）
 bash uninstall_redis.sh
 
-# 卸载（含数据）
+# 卸载（含数据 + 用户）
 bash uninstall_redis.sh --data
 ```
 
@@ -28,7 +28,7 @@ bash uninstall_redis.sh --data
 |------|-----|
 | Redis | **7.4.1** |
 | 二进制包 | `redis-7.4.1-1.el9.remi.x86_64.rpm`（Remi） |
-| 备用 | `redis-7.4.1.tar.gz`（快速编译，~2 分钟） |
+| 备用 | dnf install redis（EPEL/AppStream） |
 
 ---
 
@@ -36,12 +36,39 @@ bash uninstall_redis.sh --data
 
 ```
 [0/6] 已安装检测  →  版本一致则跳过
-[1/6] 获取包      →  本地 RPM → dnf 安装 → 本地源码 → 下载源码
-[2/6] 安装        →  rpm -ivh / dnf / 快速编译
-[3/6] 配置        →  用户 + redis.conf（AOF + RDB）
-[4/6] systemd     →  Type=notify + enable + start
+[1/6] 安装 RPM    →  本地 RPM → dnf 在线 → Remi RPM
+[2/6] 配置        →  redis.conf（AOF + RDB + 密码）
+[3/6] systemd     →  enable（开机自启）+ start
+[4/6] 设置密码    →  requirepass 验证
 [5/6] 功能验证    →  进程 + 端口 + PING + SET/GET
-[6/6] 完成
+[6/6] 完成        →  进程状态 + 账号信息 + 连接命令
+```
+
+### 安装完成输出示例
+
+```
+--- 服务状态 ---
+● redis.service - Redis 7.4.1
+   Active: active (running)
+
+============================================
+  Redis 7.4.1 安装完成
+
+  ── 账号信息 ──
+  密码:   Redis1@zendao2024
+  端口:   6379
+
+  ── 连接命令 ──
+  # 无密码连接
+  redis-cli -h 127.0.0.1 -p 6379
+
+  # 密码连接
+  redis-cli -h 127.0.0.1 -p 6379 -a 'Redis1@zendao2024'
+
+  ── 管理命令 ──
+  systemctl status redis
+  systemctl {start|stop|restart} redis
+============================================
 ```
 
 ---
@@ -52,7 +79,7 @@ bash uninstall_redis.sh --data
 redis7/
 ├── .gitignore
 ├── README.md
-├── install_redis.sh          # 二进制 RPM / 快速编译 安装
+├── install_redis.sh          # 二进制 RPM 安装
 └── uninstall_redis.sh        # 卸载清理
 ```
 
@@ -66,7 +93,6 @@ redis7/
 | `--password` | requirepass 密码 | Redis1@zendao2024 |
 | 环境变量 `REDIS_PORT` | 同 --port | 6379 |
 | 环境变量 `REDIS_PASSWORD` | 同 --password | Redis1@zendao2024 |
-| 环境变量 `INSTALL_DIR` | 安装目录 | /usr/local/redis |
 | 环境变量 `DATA_DIR` | 数据目录 | /data/redis |
 | 环境变量 `LOG_DIR` | 日志目录 | /var/log/redis |
 
@@ -81,6 +107,7 @@ redis7/
 | 淘汰策略 | `allkeys-lru` |
 | 持久化 | RDB（snapshot）+ AOF（everysec） |
 | supervised | systemd |
+| 开机自启 | `systemctl enable redis` |
 
 ---
 
@@ -101,17 +128,18 @@ systemctl start redis          # 启动
 systemctl stop redis           # 停止
 systemctl restart redis        # 重启
 systemctl status redis         # 状态
+systemctl is-enabled redis     # 是否开机自启
 journalctl -u redis -f         # 日志
 
 # 连接
-redis-cli -h 127.0.0.1 -p 6379 -a Redis1@zendao2024
+redis-cli -h 127.0.0.1 -p 6379 -a 'Redis1@zendao2024'
 ```
 
 ## 卸载
 
 ```bash
 bash uninstall_redis.sh         # 保留 /data/redis
-bash uninstall_redis.sh --data  # 全部清理
+bash uninstall_redis.sh --data  # 全部清理（含数据 + RPM + 用户）
 ```
 
 ---

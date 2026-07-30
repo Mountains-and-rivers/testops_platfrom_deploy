@@ -2,7 +2,7 @@
 # ============================================================
 # Redis 7 卸载清理
 # 用法: bash uninstall_redis.sh [--data]
-#   --data   含数据目录 /data/redis
+#   --data   含数据目录 /data/redis + 删除 redis 用户
 # ============================================================
 set -euo pipefail
 
@@ -14,35 +14,41 @@ info() { echo -e "${GREEN}[INFO]${NC}  $*"; }
 step() { echo -e "${CYAN}[STEP]${NC}  $*"; }
 
 echo "============================================"
-echo "  Redis 卸载"
+echo "  Redis 7 卸载"
 ${REMOVE_DATA} && echo "  数据: 删除" || echo "  数据: 保留"
 echo "============================================"
 
-step "[1/4] 停止服务..."
+step "[1/5] 停止服务..."
 systemctl stop redis redis-sentinel 2>/dev/null || true
-pkill -9 redis-server 2>/dev/null || true
-rm -f /etc/systemd/system/redis.service
+systemctl disable redis redis-sentinel 2>/dev/null || true
+rm -f /etc/systemd/system/redis.service /etc/systemd/system/redis-sentinel.service
 systemctl daemon-reload 2>/dev/null || true
+pkill -9 redis-server 2>/dev/null || true
 info "  服务已停止"
 
-step "[2/4] 移除安装..."
+step "[2/5] 移除安装..."
 rpm -e redis 2>/dev/null && info "  RPM 已移除" || true
 rm -rf /usr/local/redis 2>/dev/null || true
 info "  安装目录已清理"
 
-step "[3/4] 删除用户..."
-userdel -r redis 2>/dev/null && info "  redis 用户已删除" || true
+step "[3/5] 清理配置..."
+rm -rf /etc/redis 2>/dev/null || true
+info "  /etc/redis 已清理"
 
-step "[4/4] 日志 + 数据..."
-rm -rf /var/log/redis /tmp/build-cache/redis-*.rpm /tmp/build-cache/redis-*.tar.gz 2>/dev/null || true
+step "[4/5] 清理日志 & 缓存..."
+rm -rf /var/log/redis /tmp/build-cache/redis-*.rpm /tmp/build-cache/redis-*.tar.gz /tmp/redis-src 2>/dev/null || true
+info "  日志/缓存已清理"
+
+step "[5/5] 数据 & 用户..."
 if ${REMOVE_DATA}; then
     rm -rf /data/redis 2>/dev/null || true
     info "  /data/redis 已删除"
+    userdel -r redis 2>/dev/null && info "  redis 用户已删除" || true
 else
-    info "  保留 /data/redis（--data 可删除）"
+    info "  保留 /data/redis 和 redis 用户（--data 可删除）"
 fi
 
 echo ""
 echo "============================================"
-echo "  Redis 卸载完成"
+echo "  Redis 7 卸载完成"
 echo "============================================"

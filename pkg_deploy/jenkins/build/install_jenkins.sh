@@ -4,6 +4,10 @@
 # 前置: bash build_jenkins.sh（产出 /opt/jenkins/jenkins.war）
 # 用法: bash install_jenkins.sh [--force] [--port 9090]
 # ============================================================
+
+# 强制使用 bash（sh/dash 不支持 pipefail）
+[ -z "${BASH_VERSION:-}" ] && exec bash "$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")" "$@"
+
 set -euo pipefail
 cd /tmp
 

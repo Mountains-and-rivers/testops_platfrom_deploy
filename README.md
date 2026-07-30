@@ -145,7 +145,7 @@ testops_platform_deploy/
 | Java 应用 CI/CD | `pkg_deploy/java_app_cicd/` | ✅ 已实现 | P1 | Java 应用 Jenkins Pipeline + K8s 部署 |
 | Nginx | `pkg_deploy/nginx/` | ✅ 已实现 | P1 | Nginx 1.26.2（二进制 RPM） |
 | PostgreSQL 16 | `pkg_deploy/postgresql16/` | ✅ 已实现 | P1 | PostgreSQL 16.8（二进制 tar.gz） |
-| Redis 7 | `pkg_deploy/redis7/` | ✅ 已实现 | P1 | Redis 7.4.1（二进制 RPM / 快速编译） |
+| Redis 7 | `pkg_deploy/redis7/` | ✅ 已实现 | P1 | Redis 7.4.1（二进制 RPM，Remi） |
 | MySQL 8.0 | `pkg_deploy/mysql8.0/` | ✅ 已实现 | P1 | MySQL 8.0.35（二进制 tar.xz） |
 | 禅道 CLI | `pkg_deploy/zentao_cli/` | ✅ 已实现 | P2 | 禅道部署 CLI（Python） |
 | Prometheus 监控栈 | `pkg_deploy/prometheus_stack/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager |

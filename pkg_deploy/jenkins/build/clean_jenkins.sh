@@ -6,6 +6,10 @@
 #   -c  仅缓存         -u  仅用户           -m  仅 JDK/Maven
 #   --yes 跳过确认    --backup 备份后清理
 # ============================================================
+
+# 强制使用 bash（sh/dash 不支持 pipefail）
+[ -z "${BASH_VERSION:-}" ] && exec bash "$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")" "$@"
+
 set -euo pipefail; cd /tmp
 
 # ── 路径定义（与 build_jenkins.sh / install_jenkins.sh 保持一致）──
