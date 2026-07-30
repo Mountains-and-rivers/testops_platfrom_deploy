@@ -84,9 +84,9 @@ MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
 [ "${MEM_MB}" -ge 3800 ] && info "  内存 ${MEM_MB}MB" || { warn "  内存 ${MEM_MB}MB (建议 >= 4GB)"; FAILED=1; }
 
 DISK_GB=$(df -BG /opt 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G')
-[ -n "${DISK_GB}" ] && [ "${DISK_GB}" -ge 30 ] \
+[ -n "${DISK_GB}" ] && [ "${DISK_GB}" -ge 25 ] \
     && info "  磁盘 ${DISK_GB}GB" \
-    || { warn "  磁盘 ${DISK_GB:-?}GB (建议 >= 30GB)"; FAILED=1; }
+    || { warn "  磁盘 ${DISK_GB:-?}GB (建议 >= 25GB)"; FAILED=1; }
 
 command -v curl &>/dev/null || { dnf install -y curl 2>/dev/null || true; }
 
