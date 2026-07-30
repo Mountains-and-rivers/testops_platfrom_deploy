@@ -277,6 +277,10 @@ else
     info "  ✓ $(go version)"
 fi
 
+# 配置 Go 国内代理
+go env -w GOPROXY=https://goproxy.cn,direct
+info "  ✓ GOPROXY=https://goproxy.cn"
+
 # ═══════════════════════════════════════════════
 # 6. Node.js 20.x + Yarn
 # ═══════════════════════════════════════════════
@@ -472,6 +476,9 @@ fi
 # 13. 编译安装 GitLab 子组件
 # ═══════════════════════════════════════════════
 step "[13/13] 编译安装 GitLab 子组件..."
+
+# 确保 git 用户也有 Go 代理
+sudo -u git -H go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
 
 cd "${GITLAB_DIR}"
 
