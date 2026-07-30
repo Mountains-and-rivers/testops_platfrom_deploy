@@ -279,7 +279,7 @@ fi
 
 # 配置 Go 国内代理 + 模块模式
 go env -w GO111MODULE=on
-go env -w GOPROXY=https://goproxy.cn,direct
+go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct
 go env -w GOFLAGS=-v
 info "  ✓ GOPROXY=https://goproxy.cn  GO111MODULE=on  GOFLAGS=-v"
 
@@ -487,14 +487,20 @@ fi
 # ═══════════════════════════════════════════════
 step "[13/13] 编译安装 GitLab 子组件..."
 
-# 确保 git 用户也有 Go 代理
-sudo -u git -H go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
-sudo -u git -H go env -w GO111MODULE=on 2>/dev/null || true
-sudo -u git -H go env -w GOFLAGS=-v 2>/dev/null || true
-# export 环境变量确保 make 子进程也能读到（go env -w 对某些 Makefile 不生效）
-export GOPROXY=https://goproxy.cn,direct
-export GO111MODULE=on
-export GOFLAGS=-v
+	# Go proxy (root + git user, go env -w + export)
+	sudo -u git -H go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct 2>/dev/null || true
+	sudo -u git -H go env -w GO111MODULE=on 2>/dev/null || true
+	sudo -u git -H go env -w GOFLAGS=-v 2>/dev/null || true
+	sudo -u git -H go env -w GONOSUMDB=* 2>/dev/null || true
+	go env -w GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct 2>/dev/null || true
+	go env -w GONOSUMDB=* 2>/dev/null || true
+	go env -w GO111MODULE=on 2>/dev/null || true
+	export GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct
+	export GO111MODULE=on
+	export GOFLAGS=-v
+	export GONOSUMDB=*
+	export GONOSUMCHECK=*
+	export GOPRIVATE=
 
 cd "${GITLAB_DIR}"
 
@@ -514,7 +520,7 @@ else
     fi
     cd "${_GITALY_DST}"
     info "  编译 Gitaly..."
-    GOPROXY=https://goproxy.cn,direct GOFLAGS=-v GO111MODULE=on make 2>&1 || err "Gitaly 编译失败"
+    GOPROXY=https://goproxy.cn,https://mirrors.aliyun.com/goproxy,direct GONOSUMDB=* GONOSUMCHECK=* GOPRIVATE= GOFLAGS=-v GO111MODULE=on make 2>&1 || err "Gitaly 编译失败"
     [ -f "${_GITALY_DST}/gitaly" ] || err "Gitaly 编译产物缺失"
     info "  ✓ Gitaly 编译完成"
 fi

@@ -154,11 +154,17 @@ HARBOR_URL=harbor.my.com HARBOR_PROJECT=ci bash build_image.sh --prebuilt push
 ## 管理
 
 ```bash
+# ── 裸机 systemd ──
 systemctl status jenkins        # 状态
 systemctl restart jenkins       # 重启
 journalctl -u jenkins -f        # 日志
 
-# 清理（选项: -a 全部 -j 服务 -b 构建 -c 缓存 -u 用户 -m JDK/Maven）
+# ── Docker 容器 ──
+docker restart jenkins          # 重启容器
+docker logs -f jenkins          # 查看日志
+docker start jenkins            # 启动已停止的容器
+
+# ── 清理（选项: -a 全部 -j 服务 -b 构建 -c 缓存 -u 用户 -m JDK/Maven）
 bash clean_jenkins.sh -a --yes  # 全部卸载
 bash clean_jenkins.sh -b        # 仅清理构建产物
 ```

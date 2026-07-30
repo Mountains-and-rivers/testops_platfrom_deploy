@@ -23,6 +23,7 @@ RUN if [ -s /etc/yum.repos.d/centos.repo ]; then \
 # JDK + Maven + 编译工具
 RUN dnf install -y --setopt=tsflags=nodocs \
         java-${JDK_VERSION}-openjdk-devel git wget unzip findutils \
+        fontconfig dejavu-sans-fonts dejavu-serif-fonts \
     && dnf clean all && rm -rf /var/cache/dnf
 
 # Maven（优先阿里云镜像，失败回退官方源）
@@ -143,6 +144,7 @@ RUN if [ -s /etc/yum.repos.d/centos.repo ]; then \
 RUN dnf install -y --setopt=tsflags=nodocs \
         java-${JDK_VERSION}-openjdk-headless \
         tzdata shadow-utils gzip findutils \
+        fontconfig dejavu-sans-fonts dejavu-serif-fonts \
     && dnf clean all && rm -rf /var/cache/dnf \
     && rm -f /etc/yum.repos.d/centos.repo
 
