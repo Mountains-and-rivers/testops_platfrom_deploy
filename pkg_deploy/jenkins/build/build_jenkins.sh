@@ -201,7 +201,7 @@ _ensure_maven() {
     fi
 
     local pkg="apache-maven-${MAVEN_VERSION}-bin.tar.gz"
-    local url="https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/${pkg}"
+    local url="https://mirrors.aliyun.com/apache/maven/maven-3/${MAVEN_VERSION}/binaries/${pkg}"
     cd /tmp; _download "${url}" "${pkg}" "apache-maven-*.tar.gz"
     mkdir -p "${MAVEN_HOME}"
     tar -xzf "${pkg}" -C "${MAVEN_HOME}" --strip-components=1
@@ -210,7 +210,7 @@ _ensure_maven() {
     ok "Maven: $(mvn --version 2>&1 | head -1)"
 }
 
-# ── Maven settings.xml (国内镜像加速) ──────────────────
+# ── Maven settings.xml（华为云镜像，mirrorOf=* 代理全部仓库）──────────────────
 _gen_maven_settings() {
     mkdir -p ~/.m2
     cat > ~/.m2/settings.xml << 'XMLEOF'
@@ -218,35 +218,15 @@ _gen_maven_settings() {
 <settings>
   <mirrors>
     <mirror>
-      <id>aliyun-maven</id>
-      <mirrorOf>central</mirrorOf>
-      <name>Aliyun Maven</name>
-      <url>https://maven.aliyun.com/repository/public</url>
-    </mirror>
-    <mirror>
-      <id>huawei-jenkins</id>
-      <mirrorOf>repo.jenkins-ci.org</mirrorOf>
-      <name>Huawei Maven (Jenkins)</name>
+      <id>huawei-maven</id>
+      <mirrorOf>*</mirrorOf>
+      <name>Huawei Maven Mirror</name>
       <url>https://repo.huaweicloud.com/repository/maven/</url>
     </mirror>
   </mirrors>
-  <profiles>
-    <profile>
-      <id>china-mirrors</id>
-      <repositories>
-        <repository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository>
-        <repository><id>repo.jenkins-ci.org</id><url>https://repo.huaweicloud.com/repository/maven/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository>
-      </repositories>
-      <pluginRepositories>
-        <pluginRepository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository>
-        <pluginRepository><id>repo.jenkins-ci.org</id><url>https://repo.huaweicloud.com/repository/maven/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository>
-      </pluginRepositories>
-    </profile>
-  </profiles>
-  <activeProfiles><activeProfile>china-mirrors</activeProfile></activeProfiles>
 </settings>
 XMLEOF
-    info "  Maven 镜像: aliyun(central) + huawei(repo.jenkins-ci.org)"
+    info "  Maven mirror: huawei (*)"
 }
 
 # ── 获取源码 ─────────────────────────────────────────────

@@ -25,21 +25,28 @@ RUN dnf install -y --setopt=tsflags=nodocs \
         java-${JDK_VERSION}-openjdk-devel git wget unzip findutils \
     && dnf clean all && rm -rf /var/cache/dnf
 
-# Maven
-RUN MAVEN_URL="https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
-    && wget -q -O /tmp/maven.tar.gz "${MAVEN_URL}" \
+# Maven（优先阿里云镜像，失败回退官方源）
+RUN MAVEN_PKG="apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+    && for url in \
+        "https://mirrors.aliyun.com/apache/maven/maven-3/${MAVEN_VERSION}/binaries/${MAVEN_PKG}" \
+        "https://mirrors.cloud.tencent.com/apache/maven/maven-3/${MAVEN_VERSION}/binaries/${MAVEN_PKG}"; do \
+        echo "  尝试: ${url}" \
+        && wget --timeout=30 --tries=2 -O /tmp/maven.tar.gz "${url}" 2>&1 \
+        && break \
+        || echo "  失败，尝试下一个..."; \
+    done \
+    && [ -s /tmp/maven.tar.gz ] \
     && tar -xzf /tmp/maven.tar.gz -C /opt \
-    && ln -s /opt/apache-maven-${MAVEN_VERSION} /opt/maven \
+    && ln -s "/opt/apache-maven-${MAVEN_VERSION}" /opt/maven \
     && rm /tmp/maven.tar.gz
 
 ENV JAVA_HOME=/usr/lib/jvm/java-${JDK_VERSION}-openjdk \
     MAVEN_HOME=/opt/maven \
     PATH=/opt/maven/bin:/usr/lib/jvm/java-${JDK_VERSION}-openjdk/bin:${PATH}
 
-# Maven settings（双镜像加速）
-# central → aliyun | repo.jenkins-ci.org → huawei（华为云代理了 Jenkins 仓库）
+# Maven settings（华为云统一代理全部仓库，mirrorOf=* 不遗漏任何 repo ID）
 RUN mkdir -p /root/.m2 \
-    && echo '<?xml version="1.0" encoding="UTF-8"?><settings><mirrors><mirror><id>aliyun-maven</id><mirrorOf>central</mirrorOf><name>Aliyun Maven</name><url>https://maven.aliyun.com/repository/public</url></mirror><mirror><id>huawei-jenkins</id><mirrorOf>repo.jenkins-ci.org</mirrorOf><name>Huawei Maven</name><url>https://repo.huaweicloud.com/repository/maven/</url></mirror></mirrors><profiles><profile><id>china-mirrors</id><repositories><repository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository><repository><id>repo.jenkins-ci.org</id><url>https://repo.huaweicloud.com/repository/maven/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository></repositories><pluginRepositories><pluginRepository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository><pluginRepository><id>repo.jenkins-ci.org</id><url>https://repo.huaweicloud.com/repository/maven/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository></pluginRepositories></profile></profiles><activeProfiles><activeProfile>china-mirrors</activeProfile></activeProfiles></settings>' > /root/.m2/settings.xml
+    && echo '<?xml version="1.0" encoding="UTF-8"?><settings><mirrors><mirror><id>huawei-maven</id><mirrorOf>*</mirrorOf><name>Huawei Maven Mirror</name><url>https://repo.huaweicloud.com/repository/maven/</url></mirror></mirrors></settings>' > /root/.m2/settings.xml
 
 # 源码（由 build_image.sh 复制本地 jenkins.zip 到构建上下文）
 COPY jenkins.zip /tmp/

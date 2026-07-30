@@ -130,7 +130,7 @@ sudo -u git -H vim config/cable.yml      # Redis
 | 组件 | 版本 | 下载地址 | 大小 |
 |------|------|---------|------|
 | Ruby | 3.3.9 | `https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.9.tar.gz` | ~20MB |
-| Go | 1.22.10 | `https://go.dev/dl/go1.22.10.linux-amd64.tar.gz` | ~66MB |
+| Go | 1.26.4 | `https://go.dev/dl/go1.26.4.linux-amd64.tar.gz` | ~66MB |
 | Node.js | 20.18.0 | `https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-x64.tar.xz` | ~25MB |
 
 ---
@@ -205,7 +205,7 @@ gitlab/
 | `gitlab-shell-19.3.0-pre.tar.xz` | ~200KB | 同上，自动按 `GITLAB_SHELL_VERSION`(v14.56.1) 克隆 |
 | `gitlab-pages-19.3.0-pre.tar.xz` | ~222KB | 同上，自动按 `GITLAB_PAGES_VERSION`(commit 2d40411) 克隆（可选） |
 | `ruby-3.3.9.tar.gz` | ~20MB | `https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.9.tar.gz` |
-| `go1.22.10.linux-amd64.tar.gz` | ~66MB | `https://go.dev/dl/go1.22.10.linux-amd64.tar.gz` |
+| `go1.26.4.linux-amd64.tar.gz` | ~66MB | `https://go.dev/dl/go1.26.4.linux-amd64.tar.gz` |
 | `node-v20.18.0-linux-x64.tar.xz` | ~25MB | `https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-x64.tar.xz` |
 
 ### 版本要求对照 (GitLab 19.3)
@@ -213,7 +213,7 @@ gitlab/
 | 组件 | 要求版本 | 变量名 | 来源 |
 |------|---------|--------|------|
 | Ruby | 3.3.9 | `RUBY_VERSION` | 手动下载 |
-| Go | 1.22.10 | `GO_VERSION` | 手动下载 |
+| Go | 1.26.4 | `GO_VERSION` | 手动下载 |
 | Node.js | 20.18.0 | `NODE_VERSION` | 手动下载 |
 | Gitaly | commit 49c6beca | `GITALY_SERVER_VERSION` | 从 gitlab-foss 读取 |
 | GitLab Shell | v14.56.1 | `GITLAB_SHELL_VERSION` | 从 gitlab-foss 读取 |

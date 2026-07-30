@@ -35,7 +35,7 @@ PAGES_REPO="https://gitlab.com/gitlab-org/gitlab-pages.git"
 
 # ── 版本要求（GitLab 19.x） ──
 RUBY_VERSION="3.3.9"
-GO_VERSION="1.22.10"
+GO_VERSION="1.26.4"
 NODE_VERSION="20.18.0"
 
 # ── UI ──
@@ -245,7 +245,7 @@ else
 fi
 
 # ═══════════════════════════════════════════════
-# 5. Go 1.22.x
+# 5. Go
 # ═══════════════════════════════════════════════
 step "[5/13] Go ${GO_VERSION}..."
 

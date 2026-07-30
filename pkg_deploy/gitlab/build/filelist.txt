@@ -2,6 +2,6 @@ gitaly-19.3.0-pre.tar.xz
 gitlab-foss-19.3.0-pre.tar.xz
 gitlab-pages-19.3.0-pre.tar.xz
 gitlab-shell-19.3.0-pre.tar.xz
-go1.22.10.linux-amd64.tar.gz
+go1.26.4.linux-amd64.tar.gz
 node-v20.18.0-linux-x64.tar.xz
 ruby-3.3.9.tar.gz
