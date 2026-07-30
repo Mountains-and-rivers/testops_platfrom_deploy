@@ -416,7 +416,7 @@ fi
 if [ ! -f config/resque.yml ] || [ ! -s config/resque.yml ]; then
     sudo -u git -H cp config/resque.yml.example config/resque.yml 2>/dev/null || true
     # 注入 Redis 密码
-    sudo -u git -H sed -i 's|# redis.*|redis: redis://:Redis1@zendao2024@127.0.0.1:6379|' config/resque.yml 2>/dev/null || true
+    sudo -u git -H sed -i 's|# redis.*|redis: redis://:Pg1@zendao2024@127.0.0.1:6379|' config/resque.yml 2>/dev/null || true
     info "  ✓ resque.yml"
 else
     info "  ✓ resque.yml (已存在)"
@@ -426,7 +426,7 @@ fi
 if [ ! -f config/cable.yml ] || [ ! -s config/cable.yml ]; then
     sudo -u git -H cp config/cable.yml.example config/cable.yml 2>/dev/null || true
     # 注入 Redis 密码
-    sudo -u git -H sed -i 's|url:.*|url: redis://:Redis1@zendao2024@127.0.0.1:6379|' config/cable.yml 2>/dev/null || true
+    sudo -u git -H sed -i 's|url:.*|url: redis://:Pg1@zendao2024@127.0.0.1:6379|' config/cable.yml 2>/dev/null || true
     info "  ✓ cable.yml"
 else
     info "  ✓ cable.yml (已存在)"

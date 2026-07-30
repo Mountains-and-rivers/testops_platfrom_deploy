@@ -90,8 +90,8 @@ Docker 模式:
 | 配置项 | 文件 | 值 |
 |--------|------|-----|
 | PostgreSQL 连接 | `config/database.yml` | `postgres:Pg1@zendao2024@127.0.0.1` |
-| Redis（后台任务） | `config/resque.yml` | `redis://:Redis1@zendao2024@127.0.0.1:6379` |
-| Redis（ActionCable） | `config/cable.yml` | `redis://:Redis1@zendao2024@127.0.0.1:6379` |
+| Redis（后台任务） | `config/resque.yml` | `redis://:Pg1@zendao2024@127.0.0.1:6379` |
+| Redis（ActionCable） | `config/cable.yml` | `redis://:Pg1@zendao2024@127.0.0.1:6379` |
 
 如 PG/Redis 密码不同，安装后修改对应文件：
 

@@ -57,7 +57,7 @@ bash uninstall_redis.sh --data
 
   ── 认证信息 ──
   Redis 为单密码认证（无用户名概念）
-  密码:   Redis1@zendao2024
+  密码:   Pg1@zendao2024
   端口:   6379
 
   ── 连接命令 ──
@@ -65,11 +65,11 @@ bash uninstall_redis.sh --data
   redis-cli
 
   # TCP 密码连接
-  redis-cli -h 127.0.0.1 -p 6379 -a 'Redis1@zendao2024'
+  redis-cli -h 127.0.0.1 -p 6379 -a 'Pg1@zendao2024'
 
   # 交互式（先连接再认证，密码不泄露在命令行）
   redis-cli -h 127.0.0.1 -p 6379
-  > AUTH Redis1@zendao2024
+  > AUTH Pg1@zendao2024
 
   ── 管理命令 ──
   systemctl status redis          # 查看状态
@@ -96,9 +96,9 @@ redis7/
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--port` | 监听端口 | 6379 |
-| `--password` | requirepass 密码 | Redis1@zendao2024 |
+| `--password` | requirepass 密码 | Pg1@zendao2024 |
 | 环境变量 `REDIS_PORT` | 同 --port | 6379 |
-| 环境变量 `REDIS_PASSWORD` | 同 --password | Redis1@zendao2024 |
+| 环境变量 `REDIS_PASSWORD` | 同 --password | Pg1@zendao2024 |
 | 环境变量 `DATA_DIR` | 数据目录 | /data/redis |
 | 环境变量 `LOG_DIR` | 日志目录 | /var/log/redis |
 
@@ -138,7 +138,7 @@ systemctl is-enabled redis     # 是否开机自启
 journalctl -u redis -f         # 日志
 
 # 连接
-redis-cli -h 127.0.0.1 -p 6379 -a 'Redis1@zendao2024'
+redis-cli -h 127.0.0.1 -p 6379 -a 'Pg1@zendao2024'
 ```
 
 ## 卸载

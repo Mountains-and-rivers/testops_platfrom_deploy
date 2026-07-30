@@ -5,7 +5,7 @@
 # 安装方式: 二进制 RPM / dnf 在线
 # 本地优先: 脚本同目录 → /tmp/build-cache/（redis-*.rpm 通配匹配）
 #
-# 用法:     bash install_redis.sh [--port 6379] [--password Redis1@zendao2024]
+# 用法:     bash install_redis.sh [--port 6379] [--password Pg1@zendao2024]
 # ============================================================
 set -euo pipefail
 cd /tmp
@@ -14,7 +14,7 @@ cd /tmp
 REDIS_VERSION="7.4.1"
 # 本地 RPM 通配匹配（redis-*.rpm），不硬编码具体文件名
 REDIS_OFFICIAL_RPM="https://rpm.redis.io/redis-${REDIS_VERSION}-1.el9.x86_64.rpm"
-REDIS_PASSWORD="${REDIS_PASSWORD:-Redis1@zendao2024}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-Pg1@zendao2024}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/redis}"
 DATA_DIR="${DATA_DIR:-/data/redis}"
