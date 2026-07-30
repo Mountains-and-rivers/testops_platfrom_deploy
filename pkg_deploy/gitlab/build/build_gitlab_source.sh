@@ -343,12 +343,12 @@ if command -v psql &>/dev/null && psql --version 2>&1 | grep -qE '1[6-9]\.'; the
     info "  ✓ PostgreSQL $(psql --version | awk '{print $3}')"
 else
     warn "  未检测到 PostgreSQL 16+"
-    PG_SCRIPT="${_SCRIPT_DIR}/../../postgresql16/install_postgresql.sh"
+    PG_SCRIPT="${_SCRIPT_DIR}/../../postgresql17/install_postgresql.sh"
     if [ -f "${PG_SCRIPT}" ]; then
         info "  自动执行: bash ${PG_SCRIPT}"
         bash "${PG_SCRIPT}" || err "PostgreSQL 安装失败"
     else
-        warn "  请手动执行: bash ../postgresql16/install_postgresql.sh"
+        warn "  请手动执行: bash ../postgresql17/install_postgresql.sh"
     fi
 fi
 
@@ -565,13 +565,13 @@ else
         chown -R git:git "${_WORKHORSE_DST}"
         cd "${_WORKHORSE_DST}"
         info "  编译 gitlab-workhorse..."
-        make 2>&1 || err "gitlab-workhorse 编译失败"
+        GOPROXY=https://goproxy.cn,direct GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-v GO111MODULE=on make 2>&1 || err "gitlab-workhorse 编译失败"
     elif [ ! -f "${_WORKHORSE_DST}/Makefile" ]; then
         cd "${GITLAB_DIR}"
         info "  安装 gitlab-workhorse..."
-        sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production
+        sudo -u git -H env GOPROXY=https://goproxy.cn,direct GONOSUMDB=* GONOSUMCHECK=* GO111MODULE=on PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production
         cd "${_WORKHORSE_DST}"
-        make 2>&1 || true
+        GOPROXY=https://goproxy.cn,direct GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-v GO111MODULE=on make 2>&1 || true
     fi
     info "  ✓ gitlab-workhorse 就绪"
 fi
@@ -583,7 +583,7 @@ if [ -f "${_PAGES_DST}/gitlab-pages" ]; then
 elif load_source_tar "gitlab-pages" "${_PAGES_DST}"; then
     chown -R git:git "${_PAGES_DST}"
     cd "${_PAGES_DST}"
-    make 2>&1 || warn "gitlab-pages 编译有警告（可选组件）"
+    GOPROXY=https://goproxy.cn,direct GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-v GO111MODULE=on make 2>&1 || warn "gitlab-pages 编译有警告（可选组件）"
     info "  ✓ gitlab-pages 编译完成"
 else
     info "  ⚩ gitlab-pages（跳过，非必需）"

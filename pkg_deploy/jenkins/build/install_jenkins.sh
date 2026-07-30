@@ -164,6 +164,24 @@ chmod 750 "${JENKINS_HOME}/init.groovy.d"
 chmod 640 "${JENKINS_HOME}/init.groovy.d/"*.groovy 2>/dev/null || true
 ok "init.groovy.d 更新中心镜像脚本"
 
+# ── 3.5. 插件预下载 ────────────────────────────────────
+step "[3.5/8] 插件预下载（国内镜像加速）..."
+
+PREINSTALL_SCRIPT="${SCRIPT_DIR:-/tmp}/preinstall_plugins.sh"
+if [ -f "${PREINSTALL_SCRIPT}" ]; then
+    # 根据 JENKINS_PLUGIN_MIRROR 选择镜像名: ustc / tsinghua
+    _plugin_mirror="ustc"
+    case "${JENKINS_PLUGIN_MIRROR}" in
+        *tuna*|*tsinghua*) _plugin_mirror="tsinghua" ;;
+    esac
+    MIRROR="${_plugin_mirror}" JENKINS_PLUGIN_DIR="${JENKINS_HOME}/plugins" \
+        bash "${PREINSTALL_SCRIPT}" && \
+        ok "插件预下载完成" || warn "插件预下载部分失败，Jenkins 启动后会继续尝试"
+else
+    warn "未找到 ${PREINSTALL_SCRIPT}，跳过插件预下载"
+    info "  可将脚本置于 build/ 目录或指定路径"
+fi
+
 # ── 4. 日志轮转 ────────────────────────────────────────
 step "[4/8] 日志轮转..."
 

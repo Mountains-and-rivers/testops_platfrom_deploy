@@ -140,22 +140,100 @@ else
     # 先确保 Gitaly 在运行（rake gitlab:setup 需要）
     if ! systemctl is-active gitlab-gitaly &>/dev/null 2>&1; then
         info "  先启动 Gitaly（rake gitlab:setup 需要）..."
+
+        # 生成 Gitaly config.toml（首次运行时缺失）
+        if [ ! -f "${GITALY_DIR}/config.toml" ]; then
+            info "  生成 Gitaly config.toml..."
+
+            # 确保 .gitlab_shell_secret 存在（包含 gitaly_token）
+            if [ ! -f "${GITLAB_DIR}/.gitlab_shell_secret" ]; then
+                cat > "${GITLAB_DIR}/.gitlab_shell_secret" << SECEOF
+default: $(head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)
+gitaly_token: $(head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)
+SECEOF
+                chown git:git "${GITLAB_DIR}/.gitlab_shell_secret"
+                chmod 600 "${GITLAB_DIR}/.gitlab_shell_secret"
+                info "  ✓ .gitlab_shell_secret 已生成"
+            fi
+            _gitaly_token=$(grep -oP 'gitaly_token:\s*\K.*' "${GITLAB_DIR}/.gitlab_shell_secret" 2>/dev/null || head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)
+
+            mkdir -p /home/git/repositories
+            chown git:git /home/git/repositories
+
+            # 确保 Gitaly socket 目录存在
+            mkdir -p "${GITLAB_DIR}/tmp/sockets/private"
+            chown -R git:git "${GITLAB_DIR}/tmp"
+
+            # URL-encode GITLAB_DIR for the [gitlab] url
+            _gitlab_url_path=$(echo "${GITLAB_DIR}" | sed 's|/|%2F|g')
+            cat > "${GITALY_DIR}/config.toml" << GITALYCONF
+socket_path = '${GITLAB_DIR}/tmp/sockets/private/gitaly.socket'
+bin_dir = '${GITALY_DIR}/_build/bin'
+
+[gitlab]
+url = 'http+unix://${_gitlab_url_path}%2Ftmp%2Fsockets%2Fgitlab-workhorse.socket'
+
+[[storage]]
+name = 'default'
+path = '/home/git/repositories'
+
+[auth]
+token = '${_gitaly_token}'
+
+[logging]
+format = 'json'
+GITALYCONF
+            chown git:git "${GITALY_DIR}/config.toml"
+            chmod 640 "${GITALY_DIR}/config.toml"
+            info "  ✓ config.toml 已生成: ${GITALY_DIR}/config.toml"
+
+            # 同步 gitlab.yml 的 gitaly_address，确保指向正确的 Gitaly socket
+            if grep -q 'gitaly_address:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
+                sudo -u git -H sed -i "s|gitaly_address:.*|gitaly_address: unix:${GITLAB_DIR}/tmp/sockets/private/gitaly.socket|" "${GITLAB_DIR}/config/gitlab.yml"
+                info "  ✓ gitlab.yml gitaly_address 已同步"
+            fi
+        fi
+        # gitlab.target 必须存在，否则 systemctl enable 报依赖错误
+        if [ ! -f /etc/systemd/system/gitlab.target ]; then
+            cat > /etc/systemd/system/gitlab.target << 'TARGETEOF'
+[Unit]
+Description=GitLab - self-hosted git management system
+TARGETEOF
+            systemctl daemon-reload
+        fi
         if [ -f "${GITLAB_DIR}/lib/support/systemd/gitlab-gitaly.service" ]; then
             cp "${GITLAB_DIR}/lib/support/systemd/gitlab-gitaly.service" /etc/systemd/system/
             systemctl daemon-reload
-            systemctl enable gitlab-gitaly
+            systemctl enable gitlab-gitaly 2>/dev/null || true
             systemctl start gitlab-gitaly
             sleep 3
-            systemctl is-active gitlab-gitaly &>/dev/null || warn "Gitaly 可能未正常启动"
-        else
-            warn "  systemd 服务文件不存在，跳过 Gitaly 预启动"
+            systemctl is-active gitlab-gitaly &>/dev/null && info "  ✓ Gitaly 已启动" || warn "Gitaly systemd 启动失败，尝试手动启动..."
         fi
+        # 兜底：systemd 启动失败则手动后台运行
+        if ! systemctl is-active gitlab-gitaly &>/dev/null 2>&1; then
+            sudo -u git -H bash -c "cd ${GITALY_DIR} && ./_build/bin/gitaly serve ${GITALY_DIR}/config.toml &>/tmp/gitaly.log &"
+            sleep 3
+            info "  Gitaly 手动后台启动"
+        fi
+
+        # 等待 Gitaly socket 就绪
+        info "  等待 Gitaly socket 就绪..."
+        for i in $(seq 1 30); do
+            if [ -S "${GITLAB_DIR}/tmp/sockets/private/gitaly.socket" ]; then
+                info "  ✓ Gitaly socket 就绪 (${i}s)"
+                sleep 2  # 给 Gitaly 额外的初始化时间
+                break
+            fi
+            [ $i -eq 30 ] && warn "  Gitaly socket 超时 (30s)，检查: /tmp/gitaly.log"
+            sleep 1
+        done
     fi
 
     info "  执行 rake gitlab:setup（创建表结构 + 种子数据）..."
     info "  （此步骤需要 2-5 分钟，请耐心等待）"
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:setup RAILS_ENV=production force=yes  \
-        || err "rake gitlab:setup 失败（检查数据库连接和 Redis）"
+    info "  日志: /tmp/rake_setup.log"
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:setup RAILS_ENV=production force=yes --trace 2>&1 | tee /tmp/rake_setup.log \
+        || { warn "  完整日志: /tmp/rake_setup.log"; tail -80 /tmp/rake_setup.log; err "rake gitlab:setup 失败，详见 /tmp/rake_setup.log"; }
 
     info "  ✓ GitLab 初始化完成"
 fi

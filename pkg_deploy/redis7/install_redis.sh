@@ -51,18 +51,50 @@ echo "============================================"
 
 # ═══ 0. 已安装检测 ═══
 step "[0/6] 检查已安装..."
-if [ -f "${INSTALL_DIR}/bin/redis-server" ]; then
-    ver=$(${INSTALL_DIR}/bin/redis-server --version 2>&1 | awk '{print $3}' | cut -d= -f2)
-    info "  已安装 Redis ${ver}（源码编译）"
-    systemctl is-active redis &>/dev/null || systemctl start redis 2>/dev/null || true
-    info "  跳过安装"; exit 0
-fi
-if rpm -q redis &>/dev/null 2>&1; then
+
+# 查找所有可能的 redis-server 路径
+_REDIS_BIN=""
+for _c in "${INSTALL_DIR}/bin/redis-server" "/usr/bin/redis-server" "/usr/local/bin/redis-server"; do
+    [ -x "${_c}" ] && { _REDIS_BIN="${_c}"; break; }
+done
+# 用 which 兜底
+[ -z "${_REDIS_BIN}" ] && _REDIS_BIN=$(which redis-server 2>/dev/null || echo "")
+
+_SKIP=false
+if [ -n "${_REDIS_BIN}" ] && [ -x "${_REDIS_BIN}" ]; then
+    _installed_ver=$(${_REDIS_BIN} --version 2>&1 | awk '{print $3}' | cut -d= -f2)
+    info "  检测到 Redis ${_installed_ver} (${_REDIS_BIN})"
+
+    # 版本比较：如果已安装版本 >= 目标版本，跳过
+    _target_major=$(echo "${REDIS_VERSION}" | cut -d. -f1)
+    _installed_major=$(echo "${_installed_ver}" | cut -d. -f1)
+    if [ "${_installed_major}" -ge "${_target_major}" ] 2>/dev/null; then
+        info "  已安装版本 >= ${REDIS_VERSION}，跳过安装"
+        _SKIP=true
+    else
+        warn "  已安装版本 ${_installed_ver} < ${REDIS_VERSION}，覆盖安装"
+        systemctl stop redis redis-sentinel 2>/dev/null || true
+        pkill -9 redis-server 2>/dev/null || true; sleep 1
+    fi
+elif rpm -q redis &>/dev/null 2>&1; then
     RPM_VER=$(rpm -q --qf "%{VERSION}" redis 2>/dev/null || echo "?")
-    info "  已安装 Redis ${RPM_VER}（RPM）"
-    systemctl is-active redis &>/dev/null || systemctl start redis 2>/dev/null || true
+    _rpm_major=$(echo "${RPM_VER}" | cut -d. -f1)
+    _target_major=$(echo "${REDIS_VERSION}" | cut -d. -f1)
+    if [ "${_rpm_major}" -ge "${_target_major}" ] 2>/dev/null; then
+        info "  已安装 Redis ${RPM_VER}（RPM），跳过安装"
+        systemctl is-active redis &>/dev/null || systemctl start redis 2>/dev/null || true
+        _SKIP=true
+    else
+        warn "  RPM 版本 ${RPM_VER} < ${REDIS_VERSION}，覆盖安装"
+        systemctl stop redis redis-sentinel 2>/dev/null || true
+        pkill -9 redis-server 2>/dev/null || true; sleep 1
+    fi
+fi
+
+if ${_SKIP}; then
     info "  跳过安装"; exit 0
 fi
+
 systemctl stop redis redis-sentinel 2>/dev/null || true
 pkill -9 redis-server 2>/dev/null || true; sleep 1
 

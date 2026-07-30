@@ -30,7 +30,33 @@ echo ">>> JENKINS_PLUGIN_MIRROR: ${JENKINS_PLUGIN_MIRROR}"
 if [ ! -f "${JENKINS_HOME}/config.xml" ]; then
     echo ">>> 首次启动 — 初始化数据目录..."
 
-    # 创建 init.groovy.d 启动脚本（更新中心健康检查）
+    # ── 插件预下载（从国内镜像加速）────────────────
+    # 确保 JENKINS_PLUGIN_MIRROR 配置了镜像后，首次启动自动预下载建议插件
+    # 环境变量:
+    #   JENKINS_PLUGIN_MIRROR      插件下载镜像（默认 USTC，设空跳过预下载）
+    #   JENKINS_PREINSTALL_PLUGINS  要预下载的插件列表（逗号分隔，默认使用建议列表）
+    PREINSTALL_SCRIPT="/usr/local/bin/preinstall_plugins.sh"
+    if [ -n "${JENKINS_PLUGIN_MIRROR:-}" ] && [ -x "${PREINSTALL_SCRIPT}" ]; then
+        echo ">>> 预下载插件: ${JENKINS_PLUGIN_MIRROR}"
+
+        # 选择镜像名
+        _p_mirror="ustc"
+        case "${JENKINS_PLUGIN_MIRROR}" in
+            *tuna*|*tsinghua*) _p_mirror="tsinghua" ;;
+        esac
+
+        _p_opts=""
+        [ -n "${JENKINS_PREINSTALL_PLUGINS:-}" ] && _p_opts="--plugin-list ${JENKINS_PREINSTALL_PLUGINS}"
+
+        if MIRROR="${_p_mirror}" JENKINS_PLUGIN_DIR="${JENKINS_HOME}/plugins" \
+            bash "${PREINSTALL_SCRIPT}" ${_p_opts} 2>&1; then
+            echo ">>> 插件预下载完成"
+        else
+            echo ">>> 警告: 插件预下载部分失败，Jenkins 启动后会重试"
+        fi
+    fi
+
+    # ── 创建 init.groovy.d 启动脚本（更新中心健康检查）────────────────
     mkdir -p "${JENKINS_HOME}/init.groovy.d"
     cat > "${JENKINS_HOME}/init.groovy.d/update-center-mirror.groovy" << 'GROOVYEOF'
 import hudson.model.UpdateSite

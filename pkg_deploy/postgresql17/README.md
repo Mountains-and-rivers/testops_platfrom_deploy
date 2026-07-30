@@ -34,9 +34,9 @@ bash uninstall_postgresql.sh --data
 
 | 文件 | 大小 |
 |------|------|
-| `postgresql16-libs-16.8-1PGDG.rhel9.x86_64.rpm` | ~335K |
-| `postgresql16-16.8-1PGDG.rhel9.x86_64.rpm` | ~1.8M |
-| `postgresql16-server-16.8-1PGDG.rhel9.x86_64.rpm` | ~6.8M |
+| `postgresql17-libs-16.8-1PGDG.rhel9.x86_64.rpm` | ~335K |
+| `postgresql17-16.8-1PGDG.rhel9.x86_64.rpm` | ~1.8M |
+| `postgresql17-server-16.8-1PGDG.rhel9.x86_64.rpm` | ~6.8M |
 
 ---
 
@@ -88,14 +88,14 @@ bash uninstall_postgresql.sh --data
 ## 目录结构
 
 ```
-postgresql16/
+postgresql17/
 ├── .gitignore
 ├── README.md
 ├── install_postgresql.sh                          # 安装脚本
 ├── uninstall_postgresql.sh                        # 清理脚本
-├── postgresql16-libs-16.8-1PGDG.rhel9.x86_64.rpm  # 本地离线包
-├── postgresql16-16.8-1PGDG.rhel9.x86_64.rpm
-└── postgresql16-server-16.8-1PGDG.rhel9.x86_64.rpm
+├── postgresql17-libs-16.8-1PGDG.rhel9.x86_64.rpm  # 本地离线包
+├── postgresql17-16.8-1PGDG.rhel9.x86_64.rpm
+└── postgresql17-server-16.8-1PGDG.rhel9.x86_64.rpm
 ```
 
 ---

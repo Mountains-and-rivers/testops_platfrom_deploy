@@ -54,6 +54,30 @@ cat /var/lib/jenkins/secrets/initialAdminPassword
 
 > JDK 版本取决于 jenkins.war 的实际编译版本：2.576-SNAPSHOT → JDK 21，2.479.1 → JDK 17。
 
+## 插件预下载（国内镜像加速）
+
+网络环境差时（如 `java.net.SocketException: Connection reset` 问题），可在启动 Jenkins 前从国内镜像预下载插件：
+
+```bash
+# 下载建议插件到 /var/lib/jenkins/plugins（裸机）
+MIRROR=ustc PREINSTALL_SCRIPT=./preinstall_plugins.sh bash install_jenkins.sh
+
+# 或单独运行
+bash preinstall_plugins.sh                           # 默认 21 个建议插件
+bash preinstall_plugins.sh --plugin-list "git,ldap"   # 指定插件
+bash preinstall_plugins.sh --from-file plugins.txt    # 从文件读取
+```
+
+**可用镜像**：`ustc`（中科大，默认）、`tsinghua`（清华）
+
+**支持的插件下载镜像**：
+| 镜像 | URL | 状态 |
+|------|-----|------|
+| USTC | `https://mirrors.ustc.edu.cn/jenkins/plugins` | ✅ 推荐 |
+| 清华 | `https://mirrors.tuna.tsinghua.edu.cn/jenkins/plugins` | ✅ 可用 |
+
+**注意**：国内镜像只镜像 `plugins/`，不提供 `update-center.json`。更新中心元数据仍从 `updates.jenkins.io` 获取（脚本已自动处理）。
+
 ## 容器 Docker 部署
 
 ### 方式一：全量编译（源码→容器，一键）
@@ -83,8 +107,12 @@ bash build_image.sh --prebuilt
 docker run -d --name jenkins \
   -p 8080:8080 -p 50000:50000 \
   -v jenkins_home:/var/lib/jenkins \
+  -e JENKINS_PLUGIN_MIRROR=https://mirrors.ustc.edu.cn/jenkins/plugins \
   harbor.testops.local/testops/jenkins:2.479.1
 ```
+
+> **插件预下载**：设置 `JENKINS_PLUGIN_MIRROR` 环境变量后，容器首次启动会自动从国内镜像预下载建议插件，无需从 `updates.jenkins.io` 下载。
+> 使用 `JENKINS_PREINSTALL_PLUGINS` 可指定要预下载的插件列表（逗号分隔）。
 
 ### 构建 + 推送
 

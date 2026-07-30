@@ -45,20 +45,20 @@ _safe() {
 }
 
 # ── 解析参数 ────────────────────────────────────────────
-CA=false; CJ=false; CB=false; CC=false; CU=false; CM=false; YES=false; BACKUP=false
+CA=false; CJ=false; CB=false; CC=false; CU=false; CM=false; CD=false; YES=false; BACKUP=false
 while [[ $# -gt 0 ]]; do case "$1" in
-    -a) CA=true ;; -j) CJ=true ;; -b) CB=true ;; -c) CC=true ;; -u) CU=true ;; -m) CM=true ;;
+    -a) CA=true ;; -j) CJ=true ;; -b) CB=true ;; -c) CC=true ;; -u) CU=true ;; -m) CM=true ;; -d) CD=true ;;
     -h) cat << 'USAGE'
 用法: bash clean_jenkins.sh [选项]
   -a  全部（默认）   -j  Jenkins 服务   -b  构建产物
   -c  缓存           -u  用户          -m  JDK/Maven
-  --yes  跳过确认    --backup  备份 ${JENKINS_HOME}
+  -d  Docker         --yes  跳过确认   --backup  备份
 USAGE
 exit 0 ;;
     --yes) YES=true ;; --backup) BACKUP=true ;;
     *) shift ;;
 esac; shift 2>/dev/null || shift; done
-${CA} || ${CJ} || ${CB} || ${CC} || ${CU} || ${CM} || CA=true
+${CA} || ${CJ} || ${CB} || ${CC} || ${CU} || ${CM} || ${CD} || CA=true
 
 _confirm() {
     ${YES} && return 0
@@ -154,28 +154,59 @@ _clean_jdk_maven() {
     for d in ~/.m2 /root/.m2; do [ -d "${d}" ] && rm -rf "${d}" && _ok "${d}"; done
 }
 
+_clean_docker() {
+    step "Docker 容器/数据卷..."
+    if command -v docker &>/dev/null; then
+        # 停止并删除容器
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^jenkins$'; then
+            docker stop jenkins 2>/dev/null && _ok "容器已停止"
+            docker rm jenkins 2>/dev/null && _ok "容器已删除"
+        else
+            _skip "容器 jenkins"
+        fi
+        # 删除镜像
+        if docker images '*/jenkins:*' --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q jenkins; then
+            docker rmi -f $(docker images '*/jenkins:*' -q) 2>/dev/null && _ok "镜像已删除" || true
+        else
+            _skip "镜像 jenkins"
+        fi
+        # 删除数据卷
+        if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -q '^jenkins_home$'; then
+            docker volume rm jenkins_home 2>/dev/null && _ok "数据卷 jenkins_home" || _skip "数据卷 jenkins_home (仍挂载?)"
+        else
+            _skip "数据卷 jenkins_home"
+        fi
+        # 清理构建缓存
+        docker builder prune -f 2>/dev/null && _ok "Docker 构建缓存" || true
+    else
+        _skip "Docker 未安装"
+    fi
+}
+
 # ══════════════════════════════════════════════════════════
 echo "============================================"
 echo "  Jenkins 精准清理"
 echo "============================================"
 echo ""
-${CA} && echo "  全部（服务+数据+构建+缓存+用户+JDK/Maven）"
+${CA} && echo "  全部（服务+数据+Docker+构建+缓存+用户+JDK/Maven）"
 ${CJ} && echo "  Jenkins 服务（systemd、WAR、${JENKINS_HOME}）"
 ${CB} && echo "  构建产物（${BUILD_DIR}）"
 ${CC} && echo "  缓存（/tmp/build-cache）"
 ${CU} && echo "  用户 ${JENKINS_USER}"
 ${CM} && echo "  JDK/Maven"
+${CD} && echo "  Docker（容器+镜像+数据卷）"
 
 ${CA} && _confirm "删除 Jenkins 全部文件和数据（不可恢复）！"
 ${CJ} && ! ${CA} && _confirm "删除 Jenkins 服务及数据: ${JENKINS_HOME}"
 
 _backup
-${CA} && { _clean_service; _clean_build; _clean_cache; _clean_user; _clean_jdk_maven; }
+${CA} && { _clean_service; _clean_docker; _clean_build; _clean_cache; _clean_user; _clean_jdk_maven; }
 ${CJ} && _clean_service
 ${CB} && _clean_build
 ${CC} && _clean_cache
 ${CU} && _clean_user
 ${CM} && _clean_jdk_maven
+${CD} && _clean_docker
 
 echo ""; echo "============================================"
 echo "  清理完成"

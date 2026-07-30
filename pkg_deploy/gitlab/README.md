@@ -34,7 +34,7 @@ bash build/install_gitlab.sh docker 19.3.0-pre 192.168.0.104
 
 ```bash
 # 前置：PostgreSQL 16 + Redis 7
-bash ../postgresql16/install_postgresql.sh
+bash ../postgresql17/install_postgresql.sh
 bash ../redis7/install_redis.sh
 
 # 第 1 步：编译构建（~30-60 分钟）
@@ -165,7 +165,7 @@ sudo -u git -H vim config/cable.yml      # Redis
 
 | 组件 | 脚本 | 最低版本 |
 |------|------|---------|
-| PostgreSQL 16+ | `../postgresql16/install_postgresql.sh` | 16.x |
+| PostgreSQL 16+ | `../postgresql17/install_postgresql.sh` | 16.x |
 | Redis 7+ | `../redis7/install_redis.sh` | 7.x |
 
 ---

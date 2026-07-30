@@ -40,8 +40,8 @@ RUN groupadd -f -r jenkins \
     && mkdir -p ${JENKINS_HOME} /usr/share/jenkins \
     && chown -R jenkins:jenkins ${JENKINS_HOME} /usr/share/jenkins
 
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY docker-entrypoint.sh preinstall_plugins.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/preinstall_plugins.sh
 
 VOLUME ${JENKINS_HOME}
 EXPOSE 8080 50000

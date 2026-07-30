@@ -3,7 +3,7 @@
 # PostgreSQL 16.8 — 裸机单机部署（CentOS 9）
 #
 # 安装方式: 二进制 RPM（PGDG 官方仓库）/ 源码编译（TODO）
-# 包名:     postgresql16-{server,libs}-16.8-1PGDG.rhel9.x86_64.rpm
+# 包名:     postgresql17-{server,libs}-16.8-1PGDG.rhel9.x86_64.rpm
 # 本地优先: 脚本同目录 → /tmp/build-cache/（3 个 rpm 缺一不可）
 #
 # 用法:     bash install_postgresql.sh [--port 5432] [--password Pg1@zendao2024]
@@ -12,8 +12,8 @@ set -euo pipefail
 cd /tmp
 
 # ── 配置 ──
-PG_VERSION="16.8"
-PG_MAJOR="16"
+PG_VERSION="17.4"
+PG_MAJOR="17"
 PG_RPM_SERVER="postgresql${PG_MAJOR}-server-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
 PG_RPM_CLIENT="postgresql${PG_MAJOR}-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
 PG_RPM_LIBS="postgresql${PG_MAJOR}-libs-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
@@ -63,6 +63,9 @@ if [ -f "${INSTALL_DIR}/bin/postgres" ] && ${INSTALL_DIR}/bin/postgres --version
     info "  跳过安装"; exit 0
 fi
 systemctl stop postgresql 2>/dev/null || true
+	systemctl stop "postgresql-${PG_MAJOR}" 2>/dev/null || true
+	# 清理旧 PID 防止 "already running" 错误
+	rm -f "${DATA_DIR}/postmaster.pid" 2>/dev/null || true
 
 # ═══ 1. 安装 RPM ═══
 step "[1/6] 安装 RPM..."
@@ -108,10 +111,19 @@ id postgres &>/dev/null || { groupadd postgres 2>/dev/null || true; useradd -r -
 mkdir -p "${DATA_DIR}" "${LOG_DIR}"
 chown postgres:postgres "${DATA_DIR}" "${LOG_DIR}"
 
-# 检查是否已初始化
+# 检查是否已初始化（版本不匹配则重建）
 if [ -f "${DATA_DIR}/PG_VERSION" ]; then
-    info "  ✓ 数据目录已初始化，跳过 initdb"
-else
+    EXISTING_VER=$(cat "${DATA_DIR}/PG_VERSION")
+    if [ "${EXISTING_VER}" != "${PG_MAJOR}" ]; then
+        warn "  数据目录为 PG ${EXISTING_VER} 格式，PG ${PG_MAJOR} 不兼容，重建..."
+        rm -rf "${DATA_DIR}"
+        mkdir -p "${DATA_DIR}"
+        chown postgres:postgres "${DATA_DIR}"
+    else
+        info "  ✓ 数据目录已初始化 (PG ${PG_MAJOR})，跳过 initdb"
+    fi
+fi
+if [ ! -f "${DATA_DIR}/PG_VERSION" ]; then
     info "  执行 initdb..."
     su - postgres -c "${INSTALL_DIR}/bin/initdb -D ${DATA_DIR} --encoding=UTF8 --locale=en_US.UTF-8" 2>&1
     info "  ✓ initdb 完成"
@@ -145,14 +157,16 @@ if [ -f "${RPM_SERVICE}" ]; then
     cat > "/etc/systemd/system/postgresql-${PG_MAJOR}.service.d/override.conf" << OVERRIDE
 [Service]
 Environment=PGDATA=${DATA_DIR}
+[Install]
+Alias=postgresql.service
 OVERRIDE
     systemctl daemon-reload
     systemctl enable "postgresql-${PG_MAJOR}"
     systemctl start "postgresql-${PG_MAJOR}"
     sleep 2
     if systemctl is-active "postgresql-${PG_MAJOR}" &>/dev/null; then
-        SERVICE_NAME="postgresql-${PG_MAJOR}"
-        info "  ✓ 使用 RPM 自带服务: ${SERVICE_NAME}"
+        SERVICE_NAME="postgresql"
+        info "  ✓ RPM 服务已启动 (别名: postgresql)"
     else
         warn "  RPM 自带服务启动失败，创建自定义服务..."
         systemctl stop "postgresql-${PG_MAJOR}" 2>/dev/null || true

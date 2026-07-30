@@ -163,9 +163,9 @@ RUN groupadd -f -r jenkins \
     && mkdir -p ${JENKINS_HOME} /usr/share/jenkins \
     && chown -R jenkins:jenkins ${JENKINS_HOME} /usr/share/jenkins
 
-# 入口脚本
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# 入口脚本 + 插件预下载工具
+COPY docker-entrypoint.sh preinstall_plugins.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/preinstall_plugins.sh
 
 # 声明卷
 VOLUME ${JENKINS_HOME}

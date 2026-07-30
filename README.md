@@ -96,7 +96,7 @@ testops_platform_deploy/
 │   ├── harbor/                                 # Harbor 镜像仓库部署
 │   ├── jenkins/                                # Jenkins CI/CD 部署
 │   ├── nginx/                                  # Nginx 1.26 二进制 RPM 安装
-│   ├── postgresql16/                           # PostgreSQL 16 二进制安装
+│   ├── postgresql17/                           # PostgreSQL 17 二进制 RPM 安装
 │   ├── redis7/                                 # Redis 7 二进制安装
 │   ├── gitlab/                                 # GitLab CE 部署（Omnibus + Docker + 源码）
 │   ├── mysql8.0/                               # MySQL 8.0 部署
@@ -144,7 +144,7 @@ testops_platform_deploy/
 | 禅道应用部署 | `pkg_deploy/zentao/` | ✅ 已实现 | P1 | 禅道（PHP 源码编译 + Docker + K8s） |
 | Java 应用 CI/CD | `pkg_deploy/java_app_cicd/` | ✅ 已实现 | P1 | Java 应用 Jenkins Pipeline + K8s 部署 |
 | Nginx | `pkg_deploy/nginx/` | ✅ 已实现 | P1 | Nginx 1.26.2（二进制 RPM） |
-| PostgreSQL 16 | `pkg_deploy/postgresql16/` | ✅ 已实现 | P1 | PostgreSQL 16.8（二进制 tar.gz） |
+| PostgreSQL 17 | `pkg_deploy/postgresql17/` | ✅ 已实现 | P1 | PostgreSQL 17.4（二进制 RPM） |
 | Redis 7 | `pkg_deploy/redis7/` | ✅ 已实现 | P1 | Redis 7.4.1（二进制 RPM，Remi） |
 | MySQL 8.0 | `pkg_deploy/mysql8.0/` | ✅ 已实现 | P1 | MySQL 8.0.35（二进制 tar.xz） |
 | 禅道 CLI | `pkg_deploy/zentao_cli/` | ✅ 已实现 | P2 | 禅道部署 CLI（Python） |
@@ -163,7 +163,7 @@ testops_platform_deploy/
 │  ────────────                      ──────────                       │
 │  Nginx → Harbor → Jenkins → GitLab │                                │
 │    ↓                                │                                │
-│  PostgreSQL 16 + Redis 7 + MySQL   │                                │
+│  PostgreSQL 17 + Redis 7 + MySQL   │                                │
 │    ↓                                ↓                                │
 │  禅道应用 ←────────────────── K8s 集群部署 (P0)                      │
 │                                      ↓                              │
@@ -181,7 +181,7 @@ testops_platform_deploy/
 
 ```
 基础设施（裸机/VM）:
-  Nginx / PostgreSQL 16 / Redis 7 / MySQL 8.0
+  Nginx / PostgreSQL 17 / Redis 7 / MySQL 8.0
     └──→ GitLab CE / Harbor / Jenkins / 禅道应用 / Java CI/CD
 
 K8s 平台层:
@@ -197,7 +197,7 @@ K8s 平台层:
 | 组件 | 前置依赖 | 部署阶段 |
 |------|---------|---------|
 | Nginx | 无 | 基础设施层 |
-| PostgreSQL 16 | 无 | 基础设施层 |
+| PostgreSQL 17 | 无 | 基础设施层 |
 | Redis 7 | 无 | 基础设施层 |
 | MySQL 8.0 | 无 | 基础设施层 |
 | Harbor 镜像仓库 | Nginx（可选） | 基础设施层 |
@@ -351,6 +351,78 @@ python module_main.py backup
 
 # 查看部署状态
 python module_main.py status
+```
+
+## Jenkins 部署命令
+
+### 源码编译
+
+```bash
+cd pkg_deploy/jenkins/build
+
+# 完整编译（下载 JDK/Maven/Node → git clone → mvn 编译 → jenkins.war）
+bash build_jenkins.sh
+
+# 指定版本
+bash build_jenkins.sh 2.479.1
+```
+
+### Docker 镜像构建
+
+```bash
+cd pkg_deploy/jenkins/build
+
+# Docker 内全量编译（源码→WAR→镜像，一键）
+bash build_image.sh
+
+# 使用预编译 WAR（跳过 Maven 编译，需先执行 build_jenkins.sh）
+bash build_image.sh --prebuilt
+
+# 指定版本 + 构建后推送
+bash build_image.sh 2.479.1 --prebuilt push
+```
+
+### 裸机 Systemd 部署
+
+```bash
+cd pkg_deploy/jenkins/build
+
+# 安装（依赖 /opt/jenkins/jenkins.war）
+bash install_jenkins.sh
+
+# 指定端口
+bash install_jenkins.sh --port 9090
+```
+
+### 精准清理
+
+```bash
+cd pkg_deploy/jenkins/build
+
+# 全部清理：服务 + Docker + 构建产物 + 缓存 + 用户 + JDK/Maven
+bash clean_jenkins.sh -a
+
+# Docker 清理：容器 + 镜像 + 数据卷 jenkins_home
+bash clean_jenkins.sh -d
+
+# 仅 Jenkins 服务（systemd + WAR + /var/lib/jenkins）
+bash clean_jenkins.sh -j
+
+# 仅构建产物（/opt/build/jenkins + /opt/maven）
+bash clean_jenkins.sh -b
+
+# 仅缓存（/tmp/build-cache）
+bash clean_jenkins.sh -c
+
+# 仅用户（jenkins 用户）
+bash clean_jenkins.sh -u
+
+# 仅 JDK/Maven（/opt/jdk* + ~/.m2）
+bash clean_jenkins.sh -m
+
+# 组合使用
+bash clean_jenkins.sh -d -b        # 清理 Docker + 构建产物
+bash clean_jenkins.sh --yes -a     # 全部清理，跳过确认
 ```
 
 ## K8s 集群部署流程（8 阶段详解）
