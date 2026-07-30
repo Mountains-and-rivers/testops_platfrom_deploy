@@ -280,7 +280,6 @@ fi
 # 配置 Go 国内代理 + 模块模式
 go env -w GO111MODULE=on
 go env -w GOPROXY=https://goproxy.cn,direct
-go env -w GOSUMDB=sum.golang.org
 info "  ✓ GOPROXY=https://goproxy.cn  GO111MODULE=on"
 
 # ═══════════════════════════════════════════════
@@ -490,7 +489,6 @@ step "[13/13] 编译安装 GitLab 子组件..."
 # 确保 git 用户也有 Go 代理
 sudo -u git -H go env -w GOPROXY=https://goproxy.cn,direct 2>/dev/null || true
 sudo -u git -H go env -w GO111MODULE=on 2>/dev/null || true
-sudo -u git -H go env -w GOSUMDB=sum.golang.org 2>/dev/null || true
 
 cd "${GITLAB_DIR}"
 
