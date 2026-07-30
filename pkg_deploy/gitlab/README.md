@@ -83,6 +83,27 @@ Docker 模式:
 
 ---
 
+## 数据库 & Redis 连接配置
+
+脚本在 `build_gitlab_source.sh` Step 11 自动配置：
+
+| 配置项 | 文件 | 值 |
+|--------|------|-----|
+| PostgreSQL 连接 | `config/database.yml` | `postgres:Pg1@zendao2024@127.0.0.1` |
+| Redis（后台任务） | `config/resque.yml` | `redis://:Redis1@zendao2024@127.0.0.1:6379` |
+| Redis（ActionCable） | `config/cable.yml` | `redis://:Redis1@zendao2024@127.0.0.1:6379` |
+
+如 PG/Redis 密码不同，安装后修改对应文件：
+
+```bash
+cd /home/git/gitlab
+sudo -u git -H vim config/database.yml   # PostgreSQL
+sudo -u git -H vim config/resque.yml     # Redis
+sudo -u git -H vim config/cable.yml      # Redis
+```
+
+---
+
 ## 源码构建 — 仓库清单
 
 | # | 组件 | 语言 | 仓库地址 | 获取方式 |
