@@ -404,14 +404,26 @@ else
 fi
 
 # database.yml
+# GitLab 19.x 只支持 main/ci/sec，移除不支持的 geo/embedding
+_clean_db_yml() {
+    sudo -u git -H /usr/local/ruby/bin/ruby -ryaml -e "
+      db = YAML.load_file('config/database.yml')
+      db.each_value { |env| %w[geo embedding].each { |k| env.delete(k) } if env.is_a?(Hash) }
+      File.write('config/database.yml', db.to_yaml)
+    "
+}
+
 if [ ! -f config/database.yml ] || [ ! -s config/database.yml ]; then
     sudo -u git -H cp config/database.yml.postgresql config/database.yml
     sudo -u git -H sed -i 's|username: git|username: postgres|' config/database.yml
     sudo -u git -H sed -i 's|password:.*|password: Pg1@zendao2024|' config/database.yml
     sudo -u git -H sed -i 's|host:.*|host: 127.0.0.1|' config/database.yml
+    _clean_db_yml
     info "  ✓ database.yml"
 else
-    info "  ✓ database.yml (已存在)"
+    # 已存在也清理一次（防止上次失败残留 geo/embedding）
+    _clean_db_yml
+    info "  ✓ database.yml (已存在，已清理)"
 fi
 
 # secrets.yml

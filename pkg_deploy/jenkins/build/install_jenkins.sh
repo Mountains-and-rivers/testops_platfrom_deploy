@@ -23,9 +23,11 @@ JENKINS_LOG_DIR="${JENKINS_LOG_DIR:-/var/log/jenkins}"
 JENKINS_RUN_DIR="${JENKINS_RUN_DIR:-/run/jenkins}"
 HEAP_MIN="${HEAP_MIN:-2048m}"
 HEAP_MAX="${HEAP_MAX:-4096m}"
-# Jenkins 插件更新中心镜像（国内环境务必配置，否则插件下载超时）
-JENKINS_UC="${JENKINS_UC:-https://mirrors.tuna.tsinghua.edu.cn/jenkins/updates/update-center.json}"
-JENKINS_UC_DOWNLOAD="${JENKINS_UC_DOWNLOAD:-https://mirrors.tuna.tsinghua.edu.cn/jenkins/download}"
+# 更新中心 URL — 保持默认（国内镜像不提供 update-center.json）
+# 仅当需要覆盖时设置，例如: JENKINS_UC=https://updates.jenkins.io/update-center.json
+JENKINS_UC="${JENKINS_UC:-}"
+# 插件下载镜像（jenkins-plugin-cli / 离线预下载用）
+JENKINS_PLUGIN_MIRROR="${JENKINS_PLUGIN_MIRROR:-https://mirrors.ustc.edu.cn/jenkins/plugins}"
 # HTTP 代理（可选，格式 host:port）
 JENKINS_PROXY="${JENKINS_PROXY:-}"
 FORCE=false; SKIP_FW=false
@@ -124,7 +126,7 @@ HTTP_PORT=${JENKINS_PORT}
 AGENT_PORT=${AGENT_PORT}
 JENKINS_WAR=${JENKINS_WAR}
 JENKINS_UC=${JENKINS_UC}
-JENKINS_UC_DOWNLOAD=${JENKINS_UC_DOWNLOAD}
+JENKINS_PLUGIN_MIRROR=${JENKINS_PLUGIN_MIRROR}
 JENKINS_PROXY=${JENKINS_PROXY}
 SYSEOF
 chmod 644 /etc/sysconfig/jenkins; ok "/etc/sysconfig/jenkins"
@@ -135,30 +137,25 @@ cat > "${JENKINS_HOME}/init.groovy.d/update-center-mirror.groovy" << 'GROOVYEOF'
 import hudson.model.UpdateSite
 import jenkins.model.Jenkins
 
-// 更新中心镜像（国内环境加速插件下载）
-// 优先级: 环境变量 JENKINS_UC → 系统属性 → 清华镜像
-def mirrorUrl = System.getenv('JENKINS_UC') ?:
-                System.getProperty('hudson.model.UpdateCenter.updateCenterUrl') ?:
-                'https://mirrors.tuna.tsinghua.edu.cn/jenkins/updates/update-center.json'
-
+// 更新中心健康检查 & 错误恢复
+// 注意：国内镜像（USTC/清华/华为）只镜像 plugins/，不提供 update-center.json
+// 此脚本检测并恢复被错误配置的更新中心 URL
 def jenkins = Jenkins.getInstanceOrNull()
 if (jenkins != null) {
     def uc = jenkins.getUpdateCenter()
     def currentUrl = uc.getSite('default')?.getUrl()?.toString() ?: ''
-    if (currentUrl.isEmpty() || currentUrl.contains('updates.jenkins.io')) {
-        println "[init.groovy] 设置更新中心镜像: ${mirrorUrl}"
-        try {
-            // 创建新的 UpdateSite 并替换 default
-            def newSite = new UpdateSite('default', mirrorUrl)
-            def sites = uc.getSites()
-            sites.removeIf { it.getId() == 'default' }
-            sites.add(newSite)
-            println "[init.groovy] 更新中心镜像设置成功"
-        } catch (Exception e) {
-            println "[init.groovy] 更新中心镜像设置失败: ${e.message}"
-        }
-    } else {
-        println "[init.groovy] 更新中心已有自定义 URL: ${currentUrl}"
+    println "[init.groovy] Current update center: ${currentUrl}"
+
+    // 如果更新中心被错误指向国内镜像（这些镜像不提供 update-center.json），恢复官方 URL
+    if (currentUrl.contains('tuna.tsinghua.edu.cn') ||
+        currentUrl.contains('ustc.edu.cn') ||
+        currentUrl.contains('huaweicloud.com')) {
+        println "[init.groovy] WARNING: Mirror does not host update-center.json, reverting to official"
+        def officialSite = new UpdateSite('default', 'https://updates.jenkins.io/update-center.json')
+        def sites = uc.getSites()
+        sites.removeIf { it.getId() == 'default' }
+        sites.add(officialSite)
+        println "[init.groovy] Reverted to: https://updates.jenkins.io/update-center.json"
     }
 }
 GROOVYEOF
@@ -196,7 +193,6 @@ read -r -d '' JVM_OPTS << JVMEND || true
 -Duser.timezone=Asia/Shanghai
 -Djenkins.install.runSetupWizard=false
 -Dhudson.model.DirectoryBrowserSupport.CSP=sandbox
--Dhudson.model.UpdateCenter.updateCenterUrl=${JENKINS_UC}
 JVMEND
 
 # HTTP 代理 JVM 参数（可选）
