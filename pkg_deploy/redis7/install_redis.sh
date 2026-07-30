@@ -70,7 +70,7 @@ pkill -9 redis-server 2>/dev/null || true; sleep 1
 step "[1/6] 安装 Redis..."
 
 INSTALL_DIR="/usr"
-LOCAL_RPM=$(ls "${SCRIPT_DIR}/"redis-*.rpm 2>/dev/null | head -1)
+LOCAL_RPM=$(ls "${SCRIPT_DIR}/"redis-*.rpm 2>/dev/null | head -1) || true
 
 if [ -n "${LOCAL_RPM}" ] && [ -s "${LOCAL_RPM}" ]; then
     # ── 本地 RPM 优先 ──
