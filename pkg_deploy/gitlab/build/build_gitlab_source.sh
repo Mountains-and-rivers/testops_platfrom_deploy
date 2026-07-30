@@ -528,12 +528,21 @@ else
 fi
 
 # ── GitLab Shell ──
-if [ -f "${_SHELL_DST}/bin/gitlab-shell" ] || [ -f "${_SHELL_DST}/Makefile" ]; then
-    info "  ✓ gitlab-shell（本地 tar.xz）"
+if [ -f "${_SHELL_DST}/bin/gitlab-shell" ]; then
+    info "  ✓ gitlab-shell 已就绪"
 else
-    info "  安装 gitlab-shell..."
-    cd "${GITLAB_DIR}"
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:shell:install RAILS_ENV=production
+    if load_source_tar "gitlab-shell" "${_SHELL_DST}"; then
+        chown -R git:git "${_SHELL_DST}"
+    elif [ ! -f "${_SHELL_DST}/Makefile" ]; then
+        cd "${GITLAB_DIR}"
+        info "  安装 gitlab-shell..."
+        sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:shell:install RAILS_ENV=production
+    fi
+    cd "${_SHELL_DST}"
+    info "  编译 gitlab-shell..."
+    GOPROXY=https://goproxy.cn,direct GOFLAGS=-v GO111MODULE=on make build 2>&1 || err "gitlab-shell 编译失败"
+    [ -f "${_SHELL_DST}/bin/gitlab-shell" ] || err "gitlab-shell 编译产物缺失"
+    info "  ✓ gitlab-shell 编译完成"
 fi
 
 # ── GitLab Workhorse ──
