@@ -23,6 +23,11 @@ JENKINS_LOG_DIR="${JENKINS_LOG_DIR:-/var/log/jenkins}"
 JENKINS_RUN_DIR="${JENKINS_RUN_DIR:-/run/jenkins}"
 HEAP_MIN="${HEAP_MIN:-2048m}"
 HEAP_MAX="${HEAP_MAX:-4096m}"
+# Jenkins 插件更新中心镜像（国内环境务必配置，否则插件下载超时）
+JENKINS_UC="${JENKINS_UC:-https://mirrors.tuna.tsinghua.edu.cn/jenkins/updates/update-center.json}"
+JENKINS_UC_DOWNLOAD="${JENKINS_UC_DOWNLOAD:-https://mirrors.tuna.tsinghua.edu.cn/jenkins/download}"
+# HTTP 代理（可选，格式 host:port）
+JENKINS_PROXY="${JENKINS_PROXY:-}"
 FORCE=false; SKIP_FW=false
 
 while [[ $# -gt 0 ]]; do
@@ -118,8 +123,49 @@ JENKINS_HOME=${JENKINS_HOME}
 HTTP_PORT=${JENKINS_PORT}
 AGENT_PORT=${AGENT_PORT}
 JENKINS_WAR=${JENKINS_WAR}
+JENKINS_UC=${JENKINS_UC}
+JENKINS_UC_DOWNLOAD=${JENKINS_UC_DOWNLOAD}
+JENKINS_PROXY=${JENKINS_PROXY}
 SYSEOF
 chmod 644 /etc/sysconfig/jenkins; ok "/etc/sysconfig/jenkins"
+
+# init.groovy.d 启动脚本：配置更新中心镜像 + 跳过首次向导
+mkdir -p "${JENKINS_HOME}/init.groovy.d"
+cat > "${JENKINS_HOME}/init.groovy.d/update-center-mirror.groovy" << 'GROOVYEOF'
+import hudson.model.UpdateSite
+import jenkins.model.Jenkins
+
+// 更新中心镜像（国内环境加速插件下载）
+// 优先级: 环境变量 JENKINS_UC → 系统属性 → 清华镜像
+def mirrorUrl = System.getenv('JENKINS_UC') ?:
+                System.getProperty('hudson.model.UpdateCenter.updateCenterUrl') ?:
+                'https://mirrors.tuna.tsinghua.edu.cn/jenkins/updates/update-center.json'
+
+def jenkins = Jenkins.getInstanceOrNull()
+if (jenkins != null) {
+    def uc = jenkins.getUpdateCenter()
+    def currentUrl = uc.getSite('default')?.getUrl()?.toString() ?: ''
+    if (currentUrl.isEmpty() || currentUrl.contains('updates.jenkins.io')) {
+        println "[init.groovy] 设置更新中心镜像: ${mirrorUrl}"
+        try {
+            // 创建新的 UpdateSite 并替换 default
+            def newSite = new UpdateSite('default', mirrorUrl)
+            def sites = uc.getSites()
+            sites.removeIf { it.getId() == 'default' }
+            sites.add(newSite)
+            println "[init.groovy] 更新中心镜像设置成功"
+        } catch (Exception e) {
+            println "[init.groovy] 更新中心镜像设置失败: ${e.message}"
+        }
+    } else {
+        println "[init.groovy] 更新中心已有自定义 URL: ${currentUrl}"
+    }
+}
+GROOVYEOF
+chown -R "${JENKINS_USER}:${JENKINS_USER}" "${JENKINS_HOME}/init.groovy.d"
+chmod 750 "${JENKINS_HOME}/init.groovy.d"
+chmod 640 "${JENKINS_HOME}/init.groovy.d/"*.groovy 2>/dev/null || true
+ok "init.groovy.d 更新中心镜像脚本"
 
 # ── 4. 日志轮转 ────────────────────────────────────────
 step "[4/8] 日志轮转..."
@@ -150,7 +196,17 @@ read -r -d '' JVM_OPTS << JVMEND || true
 -Duser.timezone=Asia/Shanghai
 -Djenkins.install.runSetupWizard=false
 -Dhudson.model.DirectoryBrowserSupport.CSP=sandbox
+-Dhudson.model.UpdateCenter.updateCenterUrl=${JENKINS_UC}
 JVMEND
+
+# HTTP 代理 JVM 参数（可选）
+if [ -n "${JENKINS_PROXY}" ]; then
+    JVM_OPTS="${JVM_OPTS}\n-Dhttp.proxyHost=$(echo "${JENKINS_PROXY}" | cut -d: -f1)"
+    JVM_OPTS="${JVM_OPTS}\n-Dhttp.proxyPort=$(echo "${JENKINS_PROXY}" | cut -d: -f2)"
+    JVM_OPTS="${JVM_OPTS}\n-Dhttps.proxyHost=$(echo "${JENKINS_PROXY}" | cut -d: -f1)"
+    JVM_OPTS="${JVM_OPTS}\n-Dhttps.proxyPort=$(echo "${JENKINS_PROXY}" | cut -d: -f2)"
+    warn "代理: ${JENKINS_PROXY}"
+fi
 # 压缩为单行
 JVM_OPTS=$(echo "${JVM_OPTS}" | tr '\n' ' ' | sed 's/  */ /g')
 
