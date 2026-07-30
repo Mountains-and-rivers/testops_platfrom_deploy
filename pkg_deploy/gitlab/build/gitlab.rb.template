@@ -1,0 +1,36 @@
+# ============================================================
+# GitLab CE Omnibus 配置模板（安装时自动替换变量）
+# 安装脚本会将 {{PLACEHOLDER}} 替换为实际值
+# ============================================================
+
+# 外部访问地址
+external_url "http://{{GITLAB_DOMAIN}}"
+
+# HTTP 监听
+nginx['listen_port'] = 80
+nginx['listen_https'] = false
+
+# 备份关闭（内网部署可关闭以节省空间）
+# gitlab_rails['backup_keep_time'] = 604800
+
+# Git 数据目录
+git_data_dirs({ "default" => { "path" => "/var/opt/gitlab/git-data" } })
+
+# 邮件发送（可选配置）
+# gitlab_rails['smtp_enable'] = true
+# gitlab_rails['smtp_address'] = "smtp.example.com"
+# gitlab_rails['smtp_port'] = 587
+# gitlab_rails['smtp_user_name'] = "gitlab@example.com"
+# gitlab_rails['smtp_password'] = "password"
+# gitlab_rails['smtp_domain'] = "example.com"
+# gitlab_rails['smtp_authentication'] = "login"
+
+# 初始 root 密码（安装时设置，不建议在此明文存放）
+# gitlab_rails['initial_root_password'] = "{{ROOT_PASSWORD}}"
+
+# 禁用 Gravatar（内网无外网访问）
+# gitlab_rails['gravatar_enabled'] = false
+
+# Prometheus 监控（资源受限可关闭）
+# prometheus_monitoring['enable'] = false
+# node_exporter['enable'] = false

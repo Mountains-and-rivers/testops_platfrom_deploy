@@ -1,0 +1,10 @@
+# 大文件不上传 git
+*.tar.gz
+*.tar.xz
+*.tar
+*.zip
+*.deb
+*.rpm
+
+# 解压后的源码目录（不上传）
+build/gitlab-foss/

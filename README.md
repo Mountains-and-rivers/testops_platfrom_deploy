@@ -95,6 +95,10 @@ testops_platform_deploy/
 │   │
 │   ├── harbor/                                 # Harbor 镜像仓库部署
 │   ├── jenkins/                                # Jenkins CI/CD 部署
+│   ├── nginx/                                  # Nginx 1.26 二进制 RPM 安装
+│   ├── postgresql16/                           # PostgreSQL 16 二进制安装
+│   ├── redis7/                                 # Redis 7 二进制安装
+│   ├── gitlab/                                 # GitLab CE 部署（Omnibus + Docker + 源码）
 │   ├── mysql8.0/                               # MySQL 8.0 部署
 │   ├── zentao/                                 # 禅道应用部署
 │   ├── java_app_cicd/                          # Java 应用 CI/CD 部署
@@ -133,12 +137,21 @@ testops_platform_deploy/
 
 | 组件 | 目录 | 状态 | 优先级 | 说明 |
 |------|------|------|--------|------|
-| K8s 集群部署 | `pkg_deploy/k8s_cluster/` | ✅ 已实现 | P0 | Kubernetes 集群自动化部署（8阶段） |
-| 禅道平台 | `pkg_deploy/zentao_cli/` | 🔲 规划中 | P2 | 禅道项目管理平台部署 |
-| Wiki.js | `pkg_deploy/wikijs/` | 🔲 规划中 | P2 | Wiki.js 文档平台部署 |
+| K8s 集群部署 | `pkg_deploy/k8s_cluster/` | ✅ 已实现 | P0 | Kubernetes 集群自动化部署（8 阶段） |
+| Harbor 镜像仓库 | `pkg_deploy/harbor/` | ✅ 已实现 | P1 | Harbor 2.11（源码编译 + Docker Compose） |
+| Jenkins CI/CD | `pkg_deploy/jenkins/` | ✅ 已实现 | P1 | Jenkins 2.479（裸机 systemd + Docker + K8s） |
+| GitLab 代码仓库 | `pkg_deploy/gitlab/` | ✅ 已实现 | P1 | GitLab CE 19.3（Omnibus / Docker / 源码构建） |
+| 禅道应用部署 | `pkg_deploy/zentao/` | ✅ 已实现 | P1 | 禅道（PHP 源码编译 + Docker + K8s） |
+| Java 应用 CI/CD | `pkg_deploy/java_app_cicd/` | ✅ 已实现 | P1 | Java 应用 Jenkins Pipeline + K8s 部署 |
+| Nginx | `pkg_deploy/nginx/` | ✅ 已实现 | P1 | Nginx 1.26.2（二进制 RPM） |
+| PostgreSQL 16 | `pkg_deploy/postgresql16/` | ✅ 已实现 | P1 | PostgreSQL 16.8（二进制 tar.gz） |
+| Redis 7 | `pkg_deploy/redis7/` | ✅ 已实现 | P1 | Redis 7.4.1（二进制 RPM / 快速编译） |
+| MySQL 8.0 | `pkg_deploy/mysql8.0/` | ✅ 已实现 | P1 | MySQL 8.0.35（二进制 tar.xz） |
+| 禅道 CLI | `pkg_deploy/zentao_cli/` | ✅ 已实现 | P2 | 禅道部署 CLI（Python） |
 | Prometheus 监控栈 | `pkg_deploy/prometheus_stack/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager |
-| MeterSphere | `pkg_deploy/metersphere/` | 🔲 规划中 | P1 | MeterSphere 测试平台部署 |
-| AI 测试工具集 | `pkg_deploy/ai_test_suite/` | 🔲 规划中 | P3 | AI 辅助测试工具部署 |
+| MeterSphere | `pkg_deploy/metersphere/` | 🔲 规划中 | P1 | MeterSphere 测试平台 |
+| Wiki.js | `pkg_deploy/wikijs/` | 🔲 规划中 | P2 | Wiki.js 文档平台 |
+| AI 测试工具集 | `pkg_deploy/ai_test_suite/` | 🔲 规划中 | P3 | AI 辅助测试工具 |
 
 ## 部署顺序
 
