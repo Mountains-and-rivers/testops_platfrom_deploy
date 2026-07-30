@@ -43,9 +43,18 @@ elif docker-compose version &>/dev/null; then
 else
     warn "  Docker Compose"; FAILED=1
 fi
-docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${REGISTRY}/harbor-core:${HARBOR_VER}" \
-    && info "  本地镜像 ${REGISTRY}/harbor-core:${HARBOR_VER}" \
-    || { warn "  本地镜像不存在，请先执行 build_local.sh"; FAILED=1; }
+if docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^${REGISTRY}/harbor-core:${HARBOR_VER}"; then
+    info "  本地镜像 ${REGISTRY}/harbor-core:${HARBOR_VER}"
+elif docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "^goharbor/harbor-core:v${HARBOR_VER}"; then
+    info "  发现 goharbor/harbor-core:v${HARBOR_VER}，自动打标签..."
+    for img in $(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep "^goharbor/.*:v${HARBOR_VER}" || true); do
+        comp=$(echo "${img}" | cut -d/ -f2 | cut -d: -f1)
+        docker tag "${img}" "${REGISTRY}/${comp}:${HARBOR_VER}"
+        info "    ${comp} → ${REGISTRY}/${comp}:${HARBOR_VER}"
+    done
+else
+    warn "  本地镜像不存在，请先执行 build_local.sh"; FAILED=1
+fi
 [ $FAILED -eq 1 ] && err "依赖检查未通过"
 
 # ---- 1. 证书 ----
@@ -99,23 +108,39 @@ docker run --rm --entrypoint python3 \
 [ -f docker-compose.yml ] || err "docker-compose.yml 生成失败"
 info "  docker-compose.yml 已生成"
 
+# 启用 Registry GC delete，否则 GC 只标记 reclaimable 但不实际删除（reclaimed space: 0B）
+# 用 sed r 命令注入（比 a\ 中的 \n 更可移植，兼容 GNU/BSD sed）
+info "  启用 Registry GC delete..."
+REGISTRY_CONFIG="${INSTALL_DIR}/common/config/registry/config.yml"
+if [ -f "${REGISTRY_CONFIG}" ]; then
+    # 先删掉已有的 delete:/enabled: 行（幂等，可重复执行）
+    sed -i '/^  delete:$/d; /^    enabled: true$/d' "${REGISTRY_CONFIG}" 2>/dev/null || true
+    # 用 heredoc 生成 patch 文件，再通过 sed r 插入到 storage: 之后
+    cat > /tmp/registry_gc_patch << 'GCPATCH'
+  delete:
+    enabled: true
+GCPATCH
+    sed -i '/^storage:/r /tmp/registry_gc_patch' "${REGISTRY_CONFIG}"
+    rm -f /tmp/registry_gc_patch
+    info "    ✓ delete.enabled 已启用"
+else
+    warn "  registry config.yml 不存在，跳过 GC delete 配置"
+fi
+
 # prepare 可能把 private_key.pem 创建为目录，或生成格式不对——强制重新生成
 info "  生成 RSA 私钥..."
 rm -rf /data/secret/core/private_key.pem
+mkdir -p /data/secret/core
 openssl genrsa -traditional -out /data/secret/core/private_key.pem 4096
 chmod 644 /data/secret/core/private_key.pem
 
 # ---- 4. 修复兼容性问题 ----
 step "[4/7] 修复配置兼容性..."
-# 修复 PostgreSQL 主机名（prepare 生成的是 "postgresql"，实际服务名是 harbor-db）
-if [ -f common/config/core/env ]; then
-    sed -i 's|POSTGRESQL_HOST=postgresql|POSTGRESQL_HOST=harbor-db|' common/config/core/env
-fi
-# 修复镜像名称（prepare 生成 Photon 命名，替换为实际镜像名）
+# 注意: POSTGRESQL_HOST=postgresql 是正确的（docker-compose 中服务名即 postgresql）
+# 不要将其改为 harbor-db（那是容器名，Docker DNS 解析靠服务名）
+# 修复镜像名称：替换 photon 命名为实际镜像
 sed -i "s|goharbor/registry-photon:v${HARBOR_VER}|goharbor/harbor-registry:v${HARBOR_VER}|g" docker-compose.yml
-sed -i "s|goharbor/valkey-photon:v${HARBOR_VER}|goharbor/harbor-valkey:v${HARBOR_VER}|g" docker-compose.yml
-sed -i "s|goharbor/redis-photon:v${HARBOR_VER}|goharbor/harbor-valkey:v${HARBOR_VER}|g" docker-compose.yml
-sed -i "s|goharbor/trivy-adapter-photon:v${HARBOR_VER}|goharbor/harbor-trivy-adapter:v${HARBOR_VER}|g" docker-compose.yml
+sed -i "s@goharbor/valkey-photon:v${HARBOR_VER}@goharbor/harbor-valkey:v${HARBOR_VER}@g" docker-compose.yml
 info "  已修复"
 
 # ---- 5. 启动 ----
@@ -135,7 +160,10 @@ if [ -n "${PGDATA}" ]; then
 fi
 
 # 改认证为 trust（Docker 内部网络无需密码）
-docker exec harbor-db sh -c "sed -i 's/scram-sha-256/trust/g; s/md5/trust/g; s/password/trust/g' /var/lib/postgresql/data/pg18/pg_hba.conf" 2>/dev/null || true
+PG_HBA=$(docker exec harbor-db find /var/lib/postgresql/data -name pg_hba.conf -type f 2>/dev/null | head -1)
+if [ -n "${PG_HBA}" ]; then
+    docker exec harbor-db sh -c "sed -i 's/scram-sha-256/trust/g; s/md5/trust/g; s/password/trust/g' ${PG_HBA}" 2>/dev/null || true
+fi
 
 # 重启 db 使配置生效
 docker restart harbor-db 2>&1 | tail -1 || true

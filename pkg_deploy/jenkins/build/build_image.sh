@@ -27,9 +27,26 @@ HARBOR_PROJECT="${HARBOR_PROJECT:-testops}"
 HARBOR_USER="${HARBOR_USER:-admin}"
 HARBOR_PASS="${HARBOR_PASS:-}"
 IMAGE_NAME="${IMAGE_NAME:-jenkins}"
-JDK_VERSION="${JDK_VERSION:-17}"
+JDK_VERSION="${JDK_VERSION:-21}"   # Jenkins 2.555+ 统一用 JDK 21
 MODE="full"
 PUSH=""
+
+# ── JDK 版本自动匹配（与 build_jenkins.sh _detect_jdk 一致）──
+# Jenkins 2.555+ → JDK 21, 2.463+ → JDK 17, 2.361+ → JDK 11
+_detect_jdk_from_zip() {
+    local zip="$1"
+    [ -f "${zip}" ] || return 1
+    # Jenkins pom.xml 使用 CI Friendly 变量: <revision>2.576</revision> + <changelist>-SNAPSHOT</changelist>
+    local v; v=$(unzip -p "${zip}" "*/pom.xml" 2>/dev/null | grep -oP '<revision>\K[0-9.]+' | head -1)
+    [ -z "${v}" ] && return 1
+    local m; m=$(echo "${v}" | cut -d. -f1)
+    local n; n=$(echo "${v}" | cut -d. -f2)
+    if [ "${m}" -ge 3 ] || { [ "${m}" -eq 2 ] && [ "${n:-0}" -ge 555 ]; }; then echo "21"
+    elif [ "${m}" -eq 2 ] && [ "${n:-0}" -ge 463 ]; then echo "17"
+    elif [ "${m}" -eq 2 ] && [ "${n:-0}" -ge 361 ]; then echo "11"
+    else echo "11"; fi
+    return 0
+}
 
 for arg in "${@}"; do
     case "${arg}" in
@@ -137,6 +154,12 @@ else
     done
     if [ -n "${zip_found}" ]; then
         info "  源码: $(basename "${zip_found}") → 构建上下文"
+        # 从 jenkins.zip 中的 pom.xml 检测实际 JDK 版本要求（与 build_jenkins.sh 一致）
+        _detected_jdk=$(_detect_jdk_from_zip "${zip_found}" || echo "")
+        if [ -n "${_detected_jdk}" ] && [ "${_detected_jdk}" != "${JDK_VERSION}" ]; then
+            info "  JDK: pom.xml 要求 ${_detected_jdk}（参数默认 ${JDK_VERSION}），自动切换"
+            JDK_VERSION="${_detected_jdk}"
+        fi
     else
         die "  未找到 jenkins.zip 或 jenkins-${JENKINS_VERSION}.zip\n  请放到 ${SCRIPT_DIR} 或 /tmp/build-cache/"
     fi

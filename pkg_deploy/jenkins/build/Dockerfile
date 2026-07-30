@@ -11,7 +11,7 @@
 FROM centos:stream9 AS builder
 
 ARG JENKINS_VERSION=2.479.1
-ARG JDK_VERSION=17
+ARG JDK_VERSION=21
 ARG MAVEN_VERSION=3.9.16
 
 # 阿里云镜像源（build_image.sh 保证 centos.repo 始终存在，为空时跳过）
@@ -44,12 +44,15 @@ RUN mkdir -p /root/.m2 \
 COPY jenkins.zip /tmp/
 RUN unzip -q /tmp/jenkins.zip -d /tmp/jenkins-src \
     && rm /tmp/jenkins.zip \
+    # 先清理 .git（否则 rmdir 时目录非空，顶层剥不掉）
+    && find /tmp/jenkins-src -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true \
+    && find /tmp/jenkins-src -name ".github" -type d -exec rm -rf {} + 2>/dev/null || true \
     # GitHub zip 包有一层外层目录，自动剥掉
     && TOP=$(ls -1 /tmp/jenkins-src | head -1) \
     && if [ -n "${TOP}" ] && [ -d "/tmp/jenkins-src/${TOP}" ] && [ "$(ls -A /tmp/jenkins-src | wc -l)" -eq 1 ]; then \
-        mv /tmp/jenkins-src/${TOP}/* /tmp/jenkins-src/ 2>/dev/null || true; \
+        mv /tmp/jenkins-src/${TOP}/* /tmp/jenkins-src/; \
         mv /tmp/jenkins-src/${TOP}/.[!.]* /tmp/jenkins-src/ 2>/dev/null || true; \
-        rmdir /tmp/jenkins-src/${TOP} 2>/dev/null || true; \
+        rmdir /tmp/jenkins-src/${TOP}; \
     fi \
     # 移除 test 模块（集成测试，需要 maven-hpi-plugin 等 Jenkins 私有插件，编译 WAR 不需要）
     && rm -rf /tmp/jenkins-src/test \
@@ -71,11 +74,12 @@ RUN NODE_TAR=$(ls /tmp/node-v*-linux-x64.tar.gz 2>/dev/null | head -1) \
     fi \
     && rm -f /tmp/node-v*-linux-x64.tar.gz
 
-# 编译（-Pquick-build 官方快速构建 profile，与 build_jenkins.sh 保持一致）
+# 编译（-Pquick-build 官方快速构建 profile，JDK 版本由 build_image.sh 自动匹配）
 RUN cd /tmp/jenkins-src \
-    && mvn -pl war,bom -am package \
+    && mvn -pl war,bom -am clean package \
         -Pquick-build \
         -Dmaven.buildNumber.skip=true \
+        -Dcheckstyle.skip=true \
         --batch-mode --no-transfer-progress \
     && cp war/target/jenkins.war /tmp/jenkins.war \
     && cd / && rm -rf /tmp/jenkins-src /root/.m2
@@ -84,7 +88,7 @@ RUN cd /tmp/jenkins-src \
 FROM centos:stream9
 
 ARG JENKINS_VERSION=2.479.1
-ARG JDK_VERSION=17
+ARG JDK_VERSION=21
 
 LABEL maintainer="testops" \
       org.opencontainers.image.title="Jenkins" \

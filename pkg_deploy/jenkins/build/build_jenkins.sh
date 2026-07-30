@@ -392,20 +392,25 @@ _compile() {
         -Dmaven.repo.local="${repo}"
         -Djenkins.version="${JENKINS_VERSION}"
         --batch-mode --no-transfer-progress
-        clean install
     )
 
     info "  日志: ${log}"
     info "  官方: mvn -am -pl war,bom -Pquick-build clean install"
 
-    # 最多重试 2 次（处理网络波动）
-    local retry=0 war_file=""
+    # 最多重试 2 次（首次 clean install 拉取依赖，重试 -o 离线用缓存增量续跑）
+    local retry=0 war_file="" mvn_goal="clean install" mvn_offline=""
     while [ ${retry} -lt 2 ]; do
-        if mvn "${mvn_opts[@]}" 2>&1 | tee "${log}"; then
+        if mvn "${mvn_opts[@]}" ${mvn_goal} ${mvn_offline} 2>&1 | tee "${log}"; then
             break
         fi
         retry=$((retry + 1))
-        [ ${retry} -lt 2 ] && warn "  编译失败 (${retry}/2)，重试..." || { tail -60 "${log}"; die "Maven 编译失败: ${log}"; }
+        if [ ${retry} -lt 2 ]; then
+            warn "  编译失败 (${retry}/2)，重试（-o 离线 + 跳过 clean）..."
+            mvn_goal="install"
+            mvn_offline="-o"
+        else
+            tail -60 "${log}"; die "Maven 编译失败: ${log}"
+        fi
     done
 
     # 官方指定输出位置: war/target/jenkins.war
@@ -443,11 +448,47 @@ _summary() {
 }
 
 # ══════════════════════════════════════════════════════════
+readonly LOCK_FILE="/var/run/jenkins_build.lock"
+
+# 清理残留进程（上次异常退出可能留下）
+_cleanup_stale() {
+    # 检查锁文件中的 PID 是否还活着
+    if [ -f "${LOCK_FILE}" ]; then
+        local _stale_pid; _stale_pid=$(cat "${LOCK_FILE}" 2>/dev/null || echo "")
+        if [ -n "${_stale_pid}" ] && kill -0 "${_stale_pid}" 2>/dev/null; then
+            die "已有构建进程运行中 (PID: ${_stale_pid})\n  如果确认无构建运行，请删除 ${LOCK_FILE}"
+        fi
+        warn "发现残留锁文件，清理中..."
+        rm -f "${LOCK_FILE}"
+    fi
+    # 清理上次可能残留的 Maven 进程
+    local _stale_mvn; _stale_mvn=$(pgrep -f "plexus.classworlds.launcher.Launcher" 2>/dev/null || true)
+    if [ -n "${_stale_mvn}" ]; then
+        warn "发现残留 Maven 进程 (${_stale_mvn})，终止中..."
+        pkill -9 -f "plexus.classworlds.launcher.Launcher" 2>/dev/null || true
+        sleep 2
+        ok "已清理残留 Maven 进程"
+    fi
+}
+
+# 脚本退出时释放锁
+_release_lock() {
+    rm -f "${LOCK_FILE}" 2>/dev/null || true
+}
+
 main() {
+    # 确保输出目录存在（nohup 重定向需要）
+    mkdir -p "${BUILD_DIR}" "${JENKINS_DIR}"
+
     echo ""; echo "============================================"
     echo "  Jenkins ${JENKINS_VERSION} 源码编译"
     echo "  JDK ${JDK_VERSION} · Maven ${MAVEN_VERSION}"
     echo "============================================"; echo ""
+
+    # 锁机制：防止并发执行
+    _cleanup_stale
+    echo $$ > "${LOCK_FILE}"
+    trap '_release_lock' EXIT INT TERM
 
     _precheck
     _ensure_jdk

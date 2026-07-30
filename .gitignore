@@ -32,11 +32,6 @@ reports/**/*.html
 reports/**/*.json
 reports/**/*.tar.gz
 
-# K8s + Calico 离线镜像 tar 包
-pkg_deploy/k8s_cluster/images/*.tar
-pkg_deploy/k8s_cluster/images/calico/
-scripts/*.tar
-
 # Sensitive config
 *.key
 *.pem
@@ -49,6 +44,19 @@ Thumbs.db
 Desktop.ini
 
 # 编译依赖压缩包（体积大，不上传）
-pkg_deploy/mysql8.0/*.xz
-pkg_deploy/zentao/build/*.tar.gz
-pkg_deploy/zentao/build/*.zip
+# 忽略 pkg_deploy 下所有压缩包/离线镜像包
+pkg_deploy/**/*.tar
+pkg_deploy/**/*.tar.gz
+pkg_deploy/**/*.tar.xz
+pkg_deploy/**/*.tar.bz2
+pkg_deploy/**/*.tgz
+pkg_deploy/**/*.zip
+pkg_deploy/**/*.gz
+pkg_deploy/**/*.xz
+pkg_deploy/**/*.bz2
+pkg_deploy/**/*.7z
+pkg_deploy/**/*.rar
+pkg_deploy/**/*.rpm
+pkg_deploy/**/*.deb
+pkg_deploy/k8s_cluster/images/calico/
+scripts/*.tar

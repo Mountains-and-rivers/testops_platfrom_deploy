@@ -584,7 +584,7 @@ if docker images --format '{{.Repository}}:{{.Tag}}' | grep -q '^registry:2$'; t
         '/^_build_registry:/,/^_build_registryctl:/{ /^_build_registry:/s/.*/_build_registry: ; @true/; /^_build_registry:/b; /^_build_registryctl:/b; d; }' {} \;
 
     # _build_registryctl Dockerfile 需要 registry 二进制 — 改为从 registry:2 镜像 COPY
-    local rcf="${BUILD_DIR}/make/photon/registryctl/Dockerfile"
+    rcf="${BUILD_DIR}/make/photon/registryctl/Dockerfile"
     if [ -f "${rcf}" ] && grep -q './make/photon/registry/binary/registry' "${rcf}" 2>/dev/null; then
         sed -i 's|COPY ./make/photon/registry/binary/registry|COPY --from=registry:2 /bin/registry|' "${rcf}"
         info "  registryctl Dockerfile: COPY 改为 --from=registry:2"

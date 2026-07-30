@@ -90,6 +90,7 @@ _clean_service() {
     _safe "${JENKINS_RUN_DIR}" && rm -rf "${JENKINS_RUN_DIR}" && _ok "${JENKINS_RUN_DIR}" || true
 
     rm -f /etc/sysconfig/jenkins /etc/logrotate.d/jenkins /etc/profile.d/jenkins_java.sh /var/run/jenkins.pid
+    rm -f /var/run/jenkins_build.lock 2>/dev/null || true
     _ok "配置文件"
 
     if command -v firewall-cmd &>/dev/null; then
