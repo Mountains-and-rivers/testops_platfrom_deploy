@@ -5,6 +5,3 @@
 *.zip
 *.deb
 *.rpm
-
-# 解压后的源码目录（不上传）
-build/gitlab-foss/

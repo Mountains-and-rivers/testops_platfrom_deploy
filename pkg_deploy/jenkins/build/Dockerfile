@@ -36,9 +36,10 @@ ENV JAVA_HOME=/usr/lib/jvm/java-${JDK_VERSION}-openjdk \
     MAVEN_HOME=/opt/maven \
     PATH=/opt/maven/bin:/usr/lib/jvm/java-${JDK_VERSION}-openjdk/bin:${PATH}
 
-# Maven settings（阿里云镜像，与 build_jenkins.sh _gen_maven_settings 保持一致）
+# Maven settings（国内镜像加速，与 build_jenkins.sh _gen_maven_settings 保持一致）
+# central → aliyun（快），repo.jenkins-ci.org → 直连 + 超时控制（防止卡死）
 RUN mkdir -p /root/.m2 \
-    && echo '<?xml version="1.0" encoding="UTF-8"?><settings><mirrors><mirror><id>aliyun-maven</id><mirrorOf>central</mirrorOf><name>Aliyun Maven</name><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors><profiles><profile><id>aliyun</id><repositories><repository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository></repositories><pluginRepositories><pluginRepository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository></pluginRepositories></profile></profiles><activeProfiles><activeProfile>aliyun</activeProfile></activeProfiles></settings>' > /root/.m2/settings.xml
+    && echo '<?xml version="1.0" encoding="UTF-8"?><settings><mirrors><mirror><id>aliyun-maven</id><mirrorOf>central</mirrorOf><name>Aliyun Maven</name><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors><profiles><profile><id>aliyun</id><repositories><repository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository><repository><id>repo.jenkins-ci.org</id><url>https://repo.jenkins-ci.org/public/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></repository></repositories><pluginRepositories><pluginRepository><id>central</id><url>https://maven.aliyun.com/repository/public</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository><pluginRepository><id>repo.jenkins-ci.org</id><url>https://repo.jenkins-ci.org/public/</url><releases><enabled>true</enabled></releases><snapshots><enabled>false</enabled></snapshots></pluginRepository></pluginRepositories></profile></profiles><activeProfiles><activeProfile>aliyun</activeProfile></activeProfiles></settings>' > /root/.m2/settings.xml
 
 # 源码（由 build_image.sh 复制本地 jenkins.zip 到构建上下文）
 COPY jenkins.zip /tmp/
@@ -76,7 +77,10 @@ RUN NODE_TAR=$(ls /tmp/node-v*-linux-x64.tar.gz 2>/dev/null | head -1) \
 
 # 编译（-Pquick-build 官方快速构建 profile，JDK 版本由 build_image.sh 自动匹配）
 # 使用 BuildKit cache mount 持久化 Maven 本地仓库，避免每次重新下载依赖
-# 重试机制：首次下载依赖，重试用 -o 离线模式增量续跑
+# 三级重试（适配有/无/部分缓存三种场景）：
+#   ① 在线 clean install — 完整构建
+#   ② 在线 install（跳过 clean）— 网络抖动重试，保留已下载依赖
+#   ③ 离线 install -o — 仅当 ① 至少下载了部分依赖时可增量续跑
 RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
     cd /tmp/jenkins-src \
     && mvn_opts="-pl war,bom -am \
@@ -85,9 +89,25 @@ RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
         -Dcheckstyle.skip=true \
         -Dmaven.repo.local=/root/.m2 \
         -Djenkins.version=${JENKINS_VERSION} \
+        -Dmaven.wagon.http.retryHandler.count=3 \
+        -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 \
+        -Dmaven.wagon.rto=30000 \
         --batch-mode --no-transfer-progress" \
-    && (mvn ${mvn_opts} clean install \
-        || (echo "[RETRY] 首次失败，离线模式重试..." && mvn ${mvn_opts} install -o) \
+    && mvn_retry=0 \
+    && ( while [ ${mvn_retry} -lt 3 ]; do \
+            case ${mvn_retry} in \
+                0) echo ">>> Maven 编译 (1/3) clean install 在线"; \
+                   mvn ${mvn_opts} clean install && exit 0 ;; \
+                1) echo ">>> Maven 编译 (2/3) install 在线（跳过 clean，重试网络）"; \
+                   mvn ${mvn_opts} install && exit 0 ;; \
+                2) echo ">>> Maven 编译 (3/3) install 离线（使用已缓存依赖增量续跑）"; \
+                   mvn ${mvn_opts} install -o && exit 0 ;; \
+            esac; \
+            mvn_retry=$((mvn_retry + 1)); \
+            echo ">>> 第 ${mvn_retry} 次尝试失败，准备重试..."; \
+            sleep 5; \
+        done; \
+        echo ">>> 3 次尝试全部失败"; exit 1; \
        ) \
     && cp war/target/jenkins.war /tmp/jenkins.war \
     && cd / && rm -rf /tmp/jenkins-src

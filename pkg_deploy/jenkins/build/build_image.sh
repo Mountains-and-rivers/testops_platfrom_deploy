@@ -176,6 +176,9 @@ step "[4/6] Docker 构建..."
 # 清理旧镜像
 docker rmi -f "${FULL_IMAGE}" "${LATEST_IMAGE}" 2>/dev/null || true
 
+# 启用 BuildKit（支持 RUN --mount=type=cache 持久化 Maven 依赖缓存）
+export DOCKER_BUILDKIT=1
+
 docker build --no-cache \
     --build-arg "JENKINS_VERSION=${JENKINS_VERSION}" \
     --build-arg "JDK_VERSION=${JDK_VERSION}" \
