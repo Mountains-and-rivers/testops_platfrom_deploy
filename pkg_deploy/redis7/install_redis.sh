@@ -2,9 +2,8 @@
 # ============================================================
 # Redis 7.4.1 — 裸机单机部署（CentOS 9）
 #
-# 安装方式: 二进制 RPM（Remi）/ dnf 在线 / 源码编译（TODO）
-# 包名:     redis-7.4.1-1.el9.remi.x86_64.rpm
-# 本地优先: 脚本同目录 → /tmp/build-cache/
+# 安装方式: 二进制 RPM / dnf 在线
+# 本地优先: 脚本同目录 → /tmp/build-cache/（redis-*.rpm 通配匹配）
 #
 # 用法:     bash install_redis.sh [--port 6379] [--password Redis1@zendao2024]
 # ============================================================
@@ -13,8 +12,8 @@ cd /tmp
 
 # ── 配置 ──
 REDIS_VERSION="7.4.1"
-REDIS_RPM="redis-${REDIS_VERSION}-1.el9.remi.x86_64.rpm"
-REDIS_RPM_URL="https://rpms.remirepo.net/enterprise/9/remi/x86_64/${REDIS_RPM}"
+# 本地 RPM 通配匹配（redis-*.rpm），不硬编码具体文件名
+REDIS_OFFICIAL_RPM="https://rpm.redis.io/redis-${REDIS_VERSION}-1.el9.x86_64.rpm"
 REDIS_PASSWORD="${REDIS_PASSWORD:-Redis1@zendao2024}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/redis}"
@@ -67,31 +66,38 @@ fi
 systemctl stop redis redis-sentinel 2>/dev/null || true
 pkill -9 redis-server 2>/dev/null || true; sleep 1
 
-# ═══ 1. 安装 RPM ═══
+# ═══ 1. 安装 Redis ═══
 step "[1/6] 安装 Redis..."
 
-if pkg=$(get_local "${REDIS_RPM}"); then
-    info "  使用本地: $(basename ${pkg}) ($(du -h ${pkg} | cut -f1))"
-    cp "${pkg}" "/tmp/${REDIS_RPM}"
-    rpm -ivh "/tmp/${REDIS_RPM}" 2>&1 || {
+INSTALL_DIR="/usr"
+LOCAL_RPM=$(ls "${SCRIPT_DIR}/"redis-*.rpm 2>/dev/null | head -1)
+
+if [ -n "${LOCAL_RPM}" ] && [ -s "${LOCAL_RPM}" ]; then
+    # ── 本地 RPM 优先 ──
+    info "  使用本地: $(basename ${LOCAL_RPM}) ($(du -h ${LOCAL_RPM} | cut -f1))"
+    rpm -ivh "${LOCAL_RPM}" 2>&1 || {
         warn "  rpm -ivh 失败，尝试 rpm -Uvh..."
-        rpm -Uvh "/tmp/${REDIS_RPM}" 2>&1 || err "RPM 安装失败"
+        rpm -Uvh "${LOCAL_RPM}" 2>&1 || err "RPM 安装失败"
     }
-    rm -f "/tmp/${REDIS_RPM}"
-    # RPM 安装后 redis-server 在 /usr/bin/
-    INSTALL_DIR="/usr"
+
 elif command -v dnf &>/dev/null; then
+    # ── dnf 在线安装 ──
     info "  本地 RPM 不存在，尝试 dnf 在线安装..."
-    dnf install -y redis 2>&1 || {
-        warn "  dnf 失败，尝试 Remi RPM..."
-        info "  下载: ${REDIS_RPM_URL}"
-        wget -q --show-progress -O "/tmp/${REDIS_RPM}" "${REDIS_RPM_URL}" 2>/dev/null \
-            || curl -L -o "/tmp/${REDIS_RPM}" "${REDIS_RPM_URL}" \
-            || err "下载失败，请手动下载放到 ${SCRIPT_DIR}/"
-        rpm -ivh "/tmp/${REDIS_RPM}" 2>&1 || err "RPM 安装失败"
-        rm -f "/tmp/${REDIS_RPM}"
-    }
-    INSTALL_DIR="/usr"
+    if dnf install -y redis 2>&1; then
+        info "  ✓ dnf 安装完成"
+    elif dnf module install -y redis:7 2>&1; then
+        info "  ✓ dnf module redis:7 安装完成"
+    else
+        # ── 官方 Redis RPM 兜底 ──
+        warn "  dnf 均失败，尝试官方 Redis RPM..."
+        info "  下载: ${REDIS_OFFICIAL_RPM}"
+        wget -q --show-progress -O "/tmp/redis.rpm" "${REDIS_OFFICIAL_RPM}" 2>/dev/null \
+            || curl -L -o "/tmp/redis.rpm" "${REDIS_OFFICIAL_RPM}" \
+            || err "下载失败，请手动下载 redis RPM 放到 ${SCRIPT_DIR}/"
+        rpm -ivh "/tmp/redis.rpm" 2>&1 || err "RPM 安装失败"
+        rm -f "/tmp/redis.rpm"
+    fi
+
 else
     err "无 dnf，请手动下载 redis RPM 放到 ${SCRIPT_DIR}/"
 fi
