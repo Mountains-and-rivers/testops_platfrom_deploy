@@ -234,30 +234,37 @@ firewall-cmd --add-port=${REDIS_PORT}/tcp --permanent 2>/dev/null && firewall-cm
 # ═══ 6. 完成 ═══
 step "[6/6] 完成 ($(echo ${PASS}/4 项通过))"
 
-# 进程状态
+# ── 服务状态 ──
 echo ""
 echo "--- 服务状态 ---"
 systemctl status redis --no-pager -l 2>/dev/null | head -5 || true
 echo ""
 
-# 账号信息
+# ── 账号 & 连接信息 ──
 echo "============================================"
 echo "  Redis ${REDIS_VERSION} 安装完成"
 echo ""
-echo "  ── 账号信息 ──"
+echo "  ── 认证信息 ──"
+echo "  Redis 为单密码认证（无用户名概念）"
 echo "  密码:   ${REDIS_PASSWORD:-（无密码）}"
 echo "  端口:   ${REDIS_PORT}"
 echo ""
 echo "  ── 连接命令 ──"
-echo "  # 无密码连接"
-echo "  redis-cli -h 127.0.0.1 -p ${REDIS_PORT}"
+echo "  # 本地连接（无密码时）"
+echo "  redis-cli"
 echo ""
-echo "  # 密码连接"
+echo "  # TCP 密码连接"
 echo "  redis-cli -h 127.0.0.1 -p ${REDIS_PORT} -a '${REDIS_PASSWORD}'"
 echo ""
+echo "  # 交互式（先连接再认证，密码不泄露在命令行）"
+echo "  redis-cli -h 127.0.0.1 -p ${REDIS_PORT}"
+echo "  > AUTH ${REDIS_PASSWORD}"
+echo ""
 echo "  ── 管理命令 ──"
-echo "  systemctl status redis"
+echo "  systemctl status redis          # 查看状态"
 echo "  systemctl {start|stop|restart} redis"
+echo "  journalctl -u redis -f          # 查看日志"
+echo "  redis-cli -p ${REDIS_PORT} -a '...' INFO server  # 查看运行信息"
 echo ""
 echo "  卸载: bash uninstall_redis.sh"
 echo "============================================"
