@@ -96,8 +96,19 @@ command -v curl &>/dev/null || { dnf install -y curl 2>/dev/null || true; }
 # 1. 系统编译依赖
 # ═══════════════════════════════════════════════
 step "[1/13] 系统编译依赖..."
+
+# ── 配置阿里云 YUM 镜像（国内加速）──
+if [ -f "${_SCRIPT_DIR}/centos.repo" ]; then
+    info "  配置阿里云镜像: ${_SCRIPT_DIR}/centos.repo"
+    cp /etc/yum.repos.d/centos.repo /etc/yum.repos.d/centos.repo.backup 2>/dev/null || true
+    cp "${_SCRIPT_DIR}/centos.repo" /etc/yum.repos.d/centos.repo
+    dnf clean all 2>&1 | tail -1
+    dnf makecache 2>&1 | tail -1
+fi
+
 dnf install -y epel-release 2>/dev/null || true
 # CRB (CodeReady Builder): libyaml-devel / gdbm-devel 等在此仓库
+# centos.repo 已包含 [crb] 镜像源
 dnf config-manager --set-enabled crb 2>/dev/null || true
 
 dnf install -y --setopt=tsflags=nodocs \
