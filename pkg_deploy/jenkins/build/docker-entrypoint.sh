@@ -36,7 +36,7 @@ if [ ! -f "${JENKINS_HOME}/config.xml" ]; then
     #   JENKINS_PLUGIN_MIRROR      插件下载镜像（默认 USTC，设空跳过预下载）
     #   JENKINS_PREINSTALL_PLUGINS  要预下载的插件列表（逗号分隔，默认使用建议列表）
     PREINSTALL_SCRIPT="/usr/local/bin/preinstall_plugins.sh"
-    if [ -n "${JENKINS_PLUGIN_MIRROR:-}" ] && [ -x "${PREINSTALL_SCRIPT}" ]; then
+    if [ -n "${JENKINS_PLUGIN_MIRROR:-}" ] && [ -s "${PREINSTALL_SCRIPT}" ] && [ -x "${PREINSTALL_SCRIPT}" ]; then
         echo ">>> 预下载插件: ${JENKINS_PLUGIN_MIRROR}"
 
         # 选择镜像名

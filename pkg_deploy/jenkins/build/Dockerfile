@@ -92,6 +92,8 @@ RUN --mount=type=cache,target=/root/.m2,id=maven-repo \
     fi \
     && rm -f /tmp/node-v*-linux-x64.tar.gz \
     && echo "" \
+    && export MAVEN_OPTS="-Xms512m -Xmx1536m -XX:+UseG1GC" \
+    && echo ">>> Maven heap: ${MAVEN_OPTS}" \
     && MVN_OPTS="-pl war,bom -am \
         -Pquick-build \
         -Dmaven.buildNumber.skip=true \

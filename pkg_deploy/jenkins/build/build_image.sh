@@ -122,6 +122,13 @@ if [ "${MODE}" = "prebuilt" ]; then
 
     cp "${SCRIPT_DIR}/Dockerfile.prebuilt" "${BUILD_CTX}/Dockerfile"
     cp "${SCRIPT_DIR}/docker-entrypoint.sh" "${BUILD_CTX}/"
+    # 插件预下载脚本（可选，不存在时创建空占位避免 COPY 失败）
+    if [ -f "${SCRIPT_DIR}/preinstall_plugins.sh" ]; then
+        cp "${SCRIPT_DIR}/preinstall_plugins.sh" "${BUILD_CTX}/"
+    else
+        touch "${BUILD_CTX}/preinstall_plugins.sh"
+        warn "  未找到 preinstall_plugins.sh，容器首次启动将跳过插件预下载"
+    fi
     DOCKERFILE="${BUILD_CTX}/Dockerfile"
 else
     # 全量编译: Docker 内完成一切
@@ -169,6 +176,13 @@ else
 
     cp "${SCRIPT_DIR}/Dockerfile" "${BUILD_CTX}/"
     cp "${SCRIPT_DIR}/docker-entrypoint.sh" "${BUILD_CTX}/"
+    # 插件预下载脚本（可选）
+    if [ -f "${SCRIPT_DIR}/preinstall_plugins.sh" ]; then
+        cp "${SCRIPT_DIR}/preinstall_plugins.sh" "${BUILD_CTX}/"
+    else
+        touch "${BUILD_CTX}/preinstall_plugins.sh"
+        warn "  未找到 preinstall_plugins.sh，容器首次启动将跳过插件预下载"
+    fi
     DOCKERFILE="${BUILD_CTX}/Dockerfile"
 fi
 ok "构建上下文: ${BUILD_CTX}"
