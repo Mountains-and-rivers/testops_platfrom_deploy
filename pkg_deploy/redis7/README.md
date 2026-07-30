@@ -1,6 +1,6 @@
 # Redis 7.4.1 — 单机部署
 
-> 二进制 RPM（Remi）安装 / 源码编译（TODO）
+> 二进制 RPM / dnf 在线安装 / 源码编译（TODO）
 
 ---
 
@@ -27,8 +27,9 @@ bash uninstall_redis.sh --data
 | 项目 | 值 |
 |------|-----|
 | Redis | **7.4.1** |
-| 二进制包 | `redis-7.4.1-1.el9.remi.x86_64.rpm`（Remi） |
-| 备用 | dnf install redis（EPEL/AppStream） |
+| 二进制包 | `redis-*.rpm`（本地通配匹配，不限定来源） |
+| 在线安装 | `dnf install redis` / `dnf module install redis:7` |
+| 兜底下载 | https://rpm.redis.io/（官方 RPM） |
 
 ---
 
@@ -36,12 +37,12 @@ bash uninstall_redis.sh --data
 
 ```
 [0/6] 已安装检测  →  版本一致则跳过
-[1/6] 安装 RPM    →  本地 RPM → dnf 在线 → Remi RPM
+[1/6] 安装 Redis  →  本地 *.rpm → dnf redis → dnf module redis:7 → rpm.redis.io
 [2/6] 配置        →  redis.conf（AOF + RDB + 密码）
 [3/6] systemd     →  enable（开机自启）+ start
 [4/6] 设置密码    →  requirepass 验证
 [5/6] 功能验证    →  进程 + 端口 + PING + SET/GET
-[6/6] 完成        →  进程状态 + 账号信息 + 连接命令
+[6/6] 完成        →  服务状态 + 认证信息 + 连接命令
 ```
 
 ### 安装完成输出示例
@@ -54,19 +55,24 @@ bash uninstall_redis.sh --data
 ============================================
   Redis 7.4.1 安装完成
 
-  ── 账号信息 ──
+  ── 认证信息 ──
+  Redis 为单密码认证（无用户名概念）
   密码:   Redis1@zendao2024
   端口:   6379
 
   ── 连接命令 ──
-  # 无密码连接
-  redis-cli -h 127.0.0.1 -p 6379
+  # 本地连接（无密码时）
+  redis-cli
 
-  # 密码连接
+  # TCP 密码连接
   redis-cli -h 127.0.0.1 -p 6379 -a 'Redis1@zendao2024'
 
+  # 交互式（先连接再认证，密码不泄露在命令行）
+  redis-cli -h 127.0.0.1 -p 6379
+  > AUTH Redis1@zendao2024
+
   ── 管理命令 ──
-  systemctl status redis
+  systemctl status redis          # 查看状态
   systemctl {start|stop|restart} redis
 ============================================
 ```
