@@ -85,10 +85,8 @@ case "${MODE}" in
 
         # 安装
         if command -v dnf &>/dev/null; then
-            dnf install -y "${GITLAB_PKG}" 2>&1 | tail -3
-        else
-            dpkg -i "${GITLAB_PKG}" 2>&1 | tail -3
-        fi
+            dnf install -y "${GITLAB_PKG}"         else
+            dpkg -i "${GITLAB_PKG}"         fi
         info "  ✓ RPM 已安装"
 
         # 配置 gitlab.rb
@@ -100,13 +98,12 @@ case "${MODE}" in
 
         # Recon figure
         step "[4/6] gitlab-ctl reconfigure（首次需要 5-10 分钟）..."
-        gitlab-ctl reconfigure 2>&1 | tail -5 || warn "reconfigure 有警告"
+        gitlab-ctl reconfigure 2>&1 || warn "reconfigure 有警告"
         info "  ✓ reconfigure 完成"
 
         # 启动
         step "[5/6] 启动 GitLab..."
-        gitlab-ctl start 2>&1 | tail -5
-        info "  等待 GitLab 就绪..."
+        gitlab-ctl start         info "  等待 GitLab 就绪..."
 
         for i in $(seq 1 60); do
             if curl -sk --connect-timeout 3 "http://127.0.0.1:${GITLAB_PORT}/help" 2>/dev/null | grep -q 'GitLab'; then
@@ -126,7 +123,7 @@ case "${MODE}" in
                 docker load -i "${_SCRIPT_DIR}/gitlab-ce-${GITLAB_VER}.tar.gz"
                 info "  从本地 tar 加载"
             else
-                docker pull "${GITLAB_IMAGE}" 2>&1 | tail -3 || warn "拉取失败，尝试国内镜像"
+                docker pull "${GITLAB_IMAGE}" 2>&1 || warn "拉取失败，尝试国内镜像"
                 docker pull "registry.cn-hangzhou.aliyuncs.com/ethanx/gitlab-ce:${GITLAB_VER}" 2>/dev/null \
                     && docker tag "registry.cn-hangzhou.aliyuncs.com/ethanx/gitlab-ce:${GITLAB_VER}" "${GITLAB_IMAGE}"
             fi
@@ -146,8 +143,7 @@ case "${MODE}" in
             -v "${DATA_DIR}/logs:/var/log/gitlab" \
             -v "${DATA_DIR}/data:/var/opt/gitlab" \
             -e GITLAB_OMNIBUS_CONFIG="external_url 'http://${GITLAB_DOMAIN}:${GITLAB_PORT}'; gitlab_rails['initial_root_password']='${ROOT_PASS}';" \
-            "${GITLAB_IMAGE}" 2>&1 | tail -3
-        info "  ✓ 容器已启动"
+            "${GITLAB_IMAGE}"         info "  ✓ 容器已启动"
 
         step "[4/6] 等待 GitLab 就绪（首次 3-5 分钟）..."
         for i in $(seq 1 60); do

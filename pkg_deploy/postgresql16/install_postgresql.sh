@@ -101,8 +101,7 @@ mkdir -p "${DATA_DIR}" "${LOG_DIR}"
 chown -R postgres:postgres "${DATA_DIR}" "${LOG_DIR}"
 
 export PATH="${INSTALL_DIR}/bin:${PATH}"
-su - postgres -c "${INSTALL_DIR}/bin/initdb -D ${DATA_DIR} --encoding=UTF8 --locale=en_US.UTF-8" 2>&1 | tail -2
-
+su - postgres -c "${INSTALL_DIR}/bin/initdb -D ${DATA_DIR} --encoding=UTF8 --locale=en_US.UTF-8" 
 # 写入 postgresql.conf
 cat >> "${DATA_DIR}/postgresql.conf" << CONF
 listen_addresses = '*'

@@ -90,9 +90,9 @@ info "  ✓ ${NGINX_RPM}"
 # ═══ 2. 安装 ═══
 step "[2/6] 安装 RPM..."
 
-rpm -ivh "/tmp/${NGINX_RPM}" 2>&1 | tail -3 || {
+rpm -ivh "/tmp/${NGINX_RPM}"  || {
     warn "  rpm -ivh 失败，尝试 rpm -Uvh..."
-    rpm -Uvh "/tmp/${NGINX_RPM}" 2>&1 | tail -3 || err "RPM 安装失败"
+    rpm -Uvh "/tmp/${NGINX_RPM}"  || err "RPM 安装失败"
 }
 rm -f "/tmp/${NGINX_RPM}"
 

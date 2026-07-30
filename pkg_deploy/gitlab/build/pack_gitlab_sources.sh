@@ -33,8 +33,7 @@ trap "rm -rf ${TMPDIR}" EXIT
 info "克隆 gitlab-foss (${GITLAB_BRANCH})..."
 git clone --depth 1 -b "${GITLAB_BRANCH}" \
     https://gitlab.com/gitlab-org/gitlab-foss.git \
-    "${TMPDIR}/gitlab-foss" 2>&1 | tail -1
-
+    "${TMPDIR}/gitlab-foss" 
 cd "${TMPDIR}/gitlab-foss"
 
 # 读取子组件版本
@@ -86,10 +85,8 @@ clone_at_version() {
         # commit hash 方式（如 Gitaly）：需要完整克隆再 checkout
         echo "    克隆方式: 完整仓库 → checkout ${version}"
         rm -rf "${tmpdir}"
-        git clone "${repo}" "${tmpdir}" 2>&1 | tail -1
-        cd "${tmpdir}"
-        git checkout "${version}" 2>&1 | tail -1
-        cd "${TMPDIR}"
+        git clone "${repo}" "${tmpdir}"         cd "${tmpdir}"
+        git checkout "${version}"         cd "${TMPDIR}"
     fi
 
     rm -rf "${tmpdir}/.git"

@@ -133,9 +133,7 @@ else
     mkdir -p /tmp/redis-src
     tar -xzf "/tmp/${REDIS_SRC}" -C /tmp/redis-src --strip-components=1
     cd /tmp/redis-src
-    make -j$(nproc) 2>&1 | tail -2
-    make install PREFIX="${INSTALL_DIR}" 2>&1 | tail -2
-    cd /tmp; rm -rf /tmp/redis-src "/tmp/${REDIS_SRC}"
+    make -j$(nproc)     make install PREFIX="${INSTALL_DIR}"     cd /tmp; rm -rf /tmp/redis-src "/tmp/${REDIS_SRC}"
 fi
 info "  ✓ Redis $(${INSTALL_DIR}/bin/redis-server --version 2>&1 | head -1)"
 

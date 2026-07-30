@@ -102,9 +102,7 @@ if [ -f "${_SCRIPT_DIR}/centos.repo" ]; then
     info "  配置阿里云镜像: ${_SCRIPT_DIR}/centos.repo"
     cp /etc/yum.repos.d/centos.repo /etc/yum.repos.d/centos.repo.backup 2>/dev/null || true
     cp "${_SCRIPT_DIR}/centos.repo" /etc/yum.repos.d/centos.repo
-    dnf clean all 2>&1 | tail -1
-    dnf makecache 2>&1 | tail -1
-fi
+    dnf clean all     dnf makecache fi
 
 dnf install -y epel-release 2>/dev/null || true
 # CRB (CodeReady Builder): libyaml-devel / gdbm-devel 等在此仓库
@@ -120,8 +118,7 @@ dnf install -y --setopt=tsflags=nodocs \
     libyaml-devel libffi-devel gdbm-devel re2-devel \
     ncurses-devel perl perl-Image-ExifTool \
     GraphicsMagick postfix logrotate rsync \
-    2>&1 | tail -3
-info "  ✓ 编译工具链就绪"
+    info "  ✓ 编译工具链就绪"
 
 # ═══════════════════════════════════════════════
 # 2. 离线包完整性检查
@@ -190,11 +187,9 @@ else
         cd /tmp/gitaly-build
         [ -f Makefile ] || err "Gitaly Makefile 缺失，源码包不完整"
     else
-        git clone --depth 1 "${GITALY_REPO}" /tmp/gitaly-build 2>&1 | tail -1
-    fi
+        git clone --depth 1 "${GITALY_REPO}" /tmp/gitaly-build     fi
     cd /tmp/gitaly-build
-    make git GIT_PREFIX=/usr/local 2>&1 | tail -5
-    cd /tmp; rm -rf /tmp/gitaly-build
+    make git GIT_PREFIX=/usr/local     cd /tmp; rm -rf /tmp/gitaly-build
     info "  ✓ Git $(git --version)"
 fi
 
@@ -230,20 +225,16 @@ else
     cd /tmp/ruby-src
 
     info "  ./configure..."
-    ./configure --prefix=/usr/local/ruby --enable-shared --disable-install-doc 2>&1 | tail -1
-
+    ./configure --prefix=/usr/local/ruby --enable-shared --disable-install-doc 
     info "  make -j$(nproc)..."
-    make -j$(nproc) 2>&1 | tail -2
-
+    make -j$(nproc) 
     info "  make install..."
-    make install 2>&1 | tail -1
-
+    make install 
     ln -sf /usr/local/ruby/bin/* /usr/local/bin/
     cd /tmp; rm -rf /tmp/ruby-src "/tmp/${RUBY_SRC}"
 
     # RubyGems
-    gem update --system --no-document 2>&1 | tail -1
-    info "  ✓ $(ruby --version)"
+    gem update --system --no-document     info "  ✓ $(ruby --version)"
 fi
 
 # ═══════════════════════════════════════════════
@@ -307,8 +298,7 @@ else
 
     tar -C /usr/local --strip-components=1 -xJf "/tmp/${NODE_TGZ}"
     rm -f "/tmp/${NODE_TGZ}"
-    npm install -g yarn 2>&1 | tail -1
-    info "  ✓ Node $(node --version), Yarn $(yarn --version)"
+    npm install -g yarn     info "  ✓ Node $(node --version), Yarn $(yarn --version)"
 fi
 
 # ═══════════════════════════════════════════════
@@ -370,8 +360,7 @@ elif load_source_tar "gitlab-foss" "${GITLAB_DIR}"; then
     chown -R git:git "${GITLAB_DIR}"
 else
     info "  git clone ${GITLAB_REPO} -b ${GITLAB_BRANCH}"
-    sudo -u git -H git clone --depth 1 "${GITLAB_REPO}" -b "${GITLAB_BRANCH}" "${GITLAB_DIR}" 2>&1 | tail -1
-fi
+    sudo -u git -H git clone --depth 1 "${GITLAB_REPO}" -b "${GITLAB_BRANCH}" "${GITLAB_DIR}" fi
 [ -f "${GITLAB_DIR}/Gemfile" ] || err "GitLab 源码部署失败: ${GITLAB_DIR}/Gemfile 不存在"
 info "  ✓ ${GITLAB_DIR}"
 
@@ -462,8 +451,7 @@ if [ ! -d "vendor/bundle/ruby" ]; then
     sudo -u git -H bundle config set --local deployment 'true'
     sudo -u git -H bundle config set --local without 'development test kerberos'
     sudo -u git -H bundle config path "${GITLAB_DIR}/vendor/bundle"
-    sudo -u git -H bundle install -j$(nproc) 2>&1 | tail -5
-    info "  ✓ Gems 安装完成"
+    sudo -u git -H bundle install -j$(nproc)     info "  ✓ Gems 安装完成"
 fi
 
 # ═══════════════════════════════════════════════
@@ -485,11 +473,10 @@ else
         chown -R git:git "${_GITALY_DST}"
     elif [ ! -f "${_GITALY_DST}/Makefile" ]; then
         info "  克隆 Gitaly..."
-        sudo -u git -H git clone --depth 1 "${GITALY_REPO}" "${_GITALY_DST}" 2>&1 | tail -1
-    fi
+        sudo -u git -H git clone --depth 1 "${GITALY_REPO}" "${_GITALY_DST}"     fi
     cd "${_GITALY_DST}"
     info "  编译 Gitaly..."
-    make 2>&1 | tail -3 || err "Gitaly 编译失败"
+    make 2>&1 || err "Gitaly 编译失败"
     [ -f "${_GITALY_DST}/gitaly" ] || err "Gitaly 编译产物缺失"
     info "  ✓ Gitaly 编译完成"
 fi
@@ -500,8 +487,7 @@ if [ -f "${_SHELL_DST}/bin/gitlab-shell" ] || [ -f "${_SHELL_DST}/Makefile" ]; t
 else
     info "  安装 gitlab-shell..."
     cd "${GITLAB_DIR}"
-    sudo -u git -H bundle exec rake gitlab:shell:install RAILS_ENV=production 2>&1 | tail -2
-fi
+    sudo -u git -H bundle exec rake gitlab:shell:install RAILS_ENV=production fi
 
 # ── GitLab Workhorse ──
 if [ -f "${_WORKHORSE_DST}/gitlab-workhorse" ] && "${_WORKHORSE_DST}/gitlab-workhorse" -version &>/dev/null 2>&1; then
@@ -511,13 +497,12 @@ else
         chown -R git:git "${_WORKHORSE_DST}"
         cd "${_WORKHORSE_DST}"
         info "  编译 gitlab-workhorse..."
-        make 2>&1 | tail -3 || err "gitlab-workhorse 编译失败"
+        make 2>&1 || err "gitlab-workhorse 编译失败"
     elif [ ! -f "${_WORKHORSE_DST}/Makefile" ]; then
         cd "${GITLAB_DIR}"
         info "  安装 gitlab-workhorse..."
-        sudo -u git -H bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production 2>&1 | tail -2
-        cd "${_WORKHORSE_DST}"
-        make 2>&1 | tail -3 || true
+        sudo -u git -H bundle exec rake "gitlab:workhorse:install[${_WORKHORSE_DST}]" RAILS_ENV=production         cd "${_WORKHORSE_DST}"
+        make 2>&1 || true
     fi
     info "  ✓ gitlab-workhorse 就绪"
 fi
@@ -529,7 +514,7 @@ if [ -f "${_PAGES_DST}/gitlab-pages" ]; then
 elif load_source_tar "gitlab-pages" "${_PAGES_DST}"; then
     chown -R git:git "${_PAGES_DST}"
     cd "${_PAGES_DST}"
-    make 2>&1 | tail -3 || warn "gitlab-pages 编译有警告（可选组件）"
+    make 2>&1 || warn "gitlab-pages 编译有警告（可选组件）"
     info "  ✓ gitlab-pages 编译完成"
 else
     info "  ⚩ gitlab-pages（跳过，非必需）"
