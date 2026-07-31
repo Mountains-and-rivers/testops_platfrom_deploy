@@ -83,10 +83,10 @@ FAILED=0
 MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
 [ "${MEM_MB}" -ge 3800 ] && info "  内存 ${MEM_MB}MB" || { warn "  内存 ${MEM_MB}MB (建议 >= 4GB)"; FAILED=1; }
 
-DISK_GB=$(df -BG /opt 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G')
-[ -n "${DISK_GB}" ] && [ "${DISK_GB}" -ge 25 ] \
+DISK_GB=$(df -BG / 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G')
+[ -n "${DISK_GB}" ] && [ "${DISK_GB}" -ge 20 ] \
     && info "  磁盘 ${DISK_GB}GB" \
-    || { warn "  磁盘 ${DISK_GB:-?}GB (建议 >= 25GB)"; FAILED=1; }
+    || { warn "  磁盘 ${DISK_GB:-?}GB (建议 >= 20GB)"; FAILED=1; }
 
 command -v curl &>/dev/null || { dnf install -y curl 2>/dev/null || true; }
 
@@ -120,7 +120,7 @@ dnf install -y --setopt=tsflags=nodocs \
     libcurl-devel expat-devel pcre2-devel \
     libyaml-devel libffi-devel gdbm-devel re2-devel \
     ncurses-devel perl perl-Image-ExifTool \
-    postgresql-devel \
+    postgresql-devel krb5-devel \
     GraphicsMagick postfix logrotate rsync
 info "  ✓ 编译工具链就绪"
 

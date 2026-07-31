@@ -83,6 +83,19 @@ else
     warn "  ✗ PostgreSQL 未运行，请先: systemctl start postgresql"; FAILED=1
 fi
 
+# 检查 btree_gist 扩展（GitLab schema 需要）
+PG_LIBDIR=$(pg_config --pkglibdir 2>/dev/null || echo "/usr/pgsql-17/lib")
+if [ -f "${PG_LIBDIR}/btree_gist.so" ]; then
+    info "  ✓ btree_gist 扩展可用"
+else
+    warn "  ✗ btree_gist.so 缺失，尝试安装 postgresql17-contrib..."
+    PG_MAJOR_VER=$(psql --version 2>&1 | awk '{print $3}' | cut -d. -f1)
+    dnf install -y "postgresql${PG_MAJOR_VER}-contrib" 2>/dev/null \
+        || rpm -ivh "https://download.postgresql.org/pub/repos/yum/${PG_MAJOR_VER}/redhat/rhel-9-x86_64/postgresql${PG_MAJOR_VER}-contrib-${PG_MAJOR_VER}.4-1PGDG.rhel9.x86_64.rpm" 2>/dev/null \
+        || warn "  ✗ 自动安装失败，请手动安装 postgresql${PG_MAJOR_VER}-contrib"
+    [ -f "${PG_LIBDIR}/btree_gist.so" ] && info "  ✓ btree_gist 扩展已修复" || FAILED=1
+fi
+
 # 检查 Redis 运行
 systemctl is-active redis &>/dev/null && info "  ✓ Redis 运行中" \
     || { warn "  ✗ Redis 未运行，请先: systemctl start redis"; FAILED=1; }
@@ -298,9 +311,15 @@ if [ ! -d "node_modules" ] || [ "$(find node_modules -maxdepth 1 -type d | wc -l
     sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" npm config set registry https://registry.npmmirror.com 2>/dev/null || true
     sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn config set registry https://registry.npmmirror.com 2>/dev/null || true
 
-    info "  yarn install --production --pure-lockfile..."
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production --pure-lockfile  \
-        || { warn "yarn install 失败，尝试不带 --pure-lockfile..."; sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production ; }
+    # yarn.lock 中所有包 URL 都硬编码指向 registry.yarnpkg.com（忽略 registry 配置）
+    # 替换为华为云镜像（672KB/s，包含 @gitlab 包），全量替换无需区分 scope
+    info "  yarn.lock URL 替换为华为云镜像..."
+    sed -i 's|registry.yarnpkg.com|mirrors.huaweicloud.com/repository/npm|g' yarn.lock
+    info "  ✓ yarn.lock 已替换"
+
+    info "  yarn install --production --ignore-engines..."
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production --ignore-engines  \
+        || { warn "yarn install 失败，尝试不带 --ignore-engines..."; sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production --ignore-engines --network-concurrency 4 ; }
     info "  ✓ Node 依赖安装完成"
 fi
 

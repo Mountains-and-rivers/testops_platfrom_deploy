@@ -159,6 +159,7 @@ sudo -u git -H vim config/cable.yml      # Redis
 | `ncurses-devel` | `libncurses5-dev` | 终端 UI |
 | `perl-Image-ExifTool` | `libimage-exiftool-perl` | Workhorse 图片 EXIF 剥离 |
 | `postgresql-devel` | `libpq-dev` | pg gem 原生扩展编译 |
+| `krb5-devel` | `libkrb5-dev` | GSSAPI 认证头文件（gitlab-shell 编译需要） |
 | `postfix` | `postfix` | 邮件发送 |
 
 **运行时（已有独立安装脚本）：**
