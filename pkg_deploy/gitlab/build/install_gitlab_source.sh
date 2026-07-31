@@ -155,7 +155,7 @@ else
 fi
 
 # 检查 Ruby 可用
-sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bash -c 'ruby --version' &>/dev/null && info "  ✓ Ruby 可用" \
+sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" bash -c 'ruby --version' &>/dev/null && info "  ✓ Ruby 可用" \
     || { warn "  ✗ Ruby 不可用"; FAILED=1; }
 
 # 检查 Node/Yarn 可用
@@ -343,9 +343,22 @@ TARGETEOF
     fi
 
     info "  执行 rake gitlab:setup（创建表结构 + 种子数据）..."
+	# 远程模式：更新 database.yml 指向远程 PG
+	if ${REMOTE}; then
+	    info "  配置 database.yml → ${PG_HOST}:${PG_PORT}"
+	    sudo -u git -H sed -i "s|host: 127.0.0.1|host: ${PG_HOST}|g" "${GITLAB_DIR}/config/database.yml"
+	    # 确保 port 字段存在
+	    if ! grep -q 'port:' "${GITLAB_DIR}/config/database.yml" 2>/dev/null; then
+	        sudo -u git -H sed -i "s|host: ${PG_HOST}|host: ${PG_HOST}\n    port: ${PG_PORT}|" "${GITLAB_DIR}/config/database.yml"
+	    else
+	        sudo -u git -H sed -i "s|port: .*|port: ${PG_PORT}|g" "${GITLAB_DIR}/config/database.yml"
+	    fi
+	    info "  ✓ database.yml 已更新"
+	fi
+
     info "  （此步骤需要 2-5 分钟，请耐心等待）"
     info "  日志: /tmp/rake_setup.log"
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rake gitlab:setup RAILS_ENV=production force=yes --trace 2>&1 | tee /tmp/rake_setup.log \
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rake gitlab:setup RAILS_ENV=production force=yes --trace 2>&1 | tee /tmp/rake_setup.log \
         || { warn "  完整日志: /tmp/rake_setup.log"; tail -80 /tmp/rake_setup.log; err "rake gitlab:setup 失败，详见 /tmp/rake_setup.log"; }
 
     info "  ✓ GitLab 初始化完成"
@@ -377,8 +390,8 @@ fi
 
 if [ ! -d "node_modules" ] || [ "$(find node_modules -maxdepth 1 -type d | wc -l)" -lt 50 ]; then
     # 为 git 用户配置 npm/yarn 国内镜像
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" npm config set registry https://registry.npmmirror.com 2>/dev/null || true
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn config set registry https://registry.npmmirror.com 2>/dev/null || true
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" npm config set registry https://registry.npmmirror.com 2>/dev/null || true
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" yarn config set registry https://registry.npmmirror.com 2>/dev/null || true
 
     # yarn.lock 中所有包 URL 都硬编码指向 registry.yarnpkg.com（忽略 registry 配置）
     # 替换为华为云镜像（672KB/s，包含 @gitlab 包），全量替换无需区分 scope
@@ -387,8 +400,8 @@ if [ ! -d "node_modules" ] || [ "$(find node_modules -maxdepth 1 -type d | wc -l
     info "  ✓ yarn.lock 已替换"
 
     info "  yarn install --production --ignore-engines..."
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production --ignore-engines  \
-        || { warn "yarn install 失败，尝试不带 --ignore-engines..."; sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" yarn install --production --ignore-engines --network-concurrency 4 ; }
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" yarn install --production --ignore-engines  \
+        || { warn "yarn install 失败，尝试不带 --ignore-engines..."; sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" yarn install --production --ignore-engines --network-concurrency 4 ; }
     info "  ✓ Node 依赖安装完成"
 fi
 
@@ -397,7 +410,7 @@ if [ -d "public/assets" ] && [ "$(ls public/assets/ | wc -l)" -gt 10 ]; then
     info "  ✓ public/assets 已编译，跳过 assets:compile"
 else
     info "  编译前端资源（此步骤 5-15 分钟）..."
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" NODE_OPTIONS="--max-old-space-size=4096" bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production  \
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" NODE_OPTIONS="--max-old-space-size=4096" bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production  \
         || err "前端资源编译失败（机器内存不足，建议 >= 16GB）"
     info "  ✓ 前端资源编译完成"
 fi
@@ -630,7 +643,7 @@ echo "  HTTP: ${HTTP_CODE}"
 if ${READY}; then
     info "  设置 root 密码..."
     cd "${GITLAB_DIR}"
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rails runner "user = User.find_by(username:'root'); user.password='${ROOT_PASS}'; user.password_confirmation='${ROOT_PASS}'; user.save!" RAILS_ENV=production 2>/dev/null \
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" bundle exec rails runner "user = User.find_by(username:'root'); user.password='${ROOT_PASS}'; user.password_confirmation='${ROOT_PASS}'; user.save!" RAILS_ENV=production 2>/dev/null \
         && info "  ✓ root 密码已设置" \
         || info "  root 密码可能已设置，跳过"
 fi
@@ -650,6 +663,6 @@ echo "    systemctl stop gitlab.target      # 停止全部"
 echo "    systemctl status gitlab-gitaly    # 查看各组件状态"
 echo "    journalctl -u gitlab-puma -f     # 查看 Puma 日志"
 echo ""
-echo "  检查: cd ${GITLAB_DIR} && sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:check RAILS_ENV=production"
+echo "  检查: cd ${GITLAB_DIR} && sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" bundle exec rake gitlab:check RAILS_ENV=production"
 echo "  卸载: bash clean_gitlab.sh source --data"
 echo "============================================"
