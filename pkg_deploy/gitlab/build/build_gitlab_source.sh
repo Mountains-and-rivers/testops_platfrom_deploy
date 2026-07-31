@@ -36,7 +36,7 @@ PAGES_REPO="https://gitlab.com/gitlab-org/gitlab-pages.git"
 # ── 版本要求（GitLab 19.x） ──
 RUBY_VERSION="3.3.9"
 GO_VERSION="1.26.4"
-NODE_VERSION="20.18.0"
+NODE_VERSION="22.20.0"
 
 # ── UI ──
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'

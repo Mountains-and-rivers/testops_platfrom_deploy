@@ -131,7 +131,7 @@ sudo -u git -H vim config/cable.yml      # Redis
 |------|------|---------|------|
 | Ruby | 3.3.9 | `https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.9.tar.gz` | ~20MB |
 | Go | 1.26.4 | `https://go.dev/dl/go1.26.4.linux-amd64.tar.gz` | ~66MB |
-| Node.js | 20.18.0 | `https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-x64.tar.xz` | ~25MB |
+| Node.js | 22.20.0 | `https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz` | ~29MB |
 
 ---
 
@@ -232,7 +232,7 @@ bash build/clean_gitlab.sh source --data
 | `gitlab-pages-19.3.0-pre.tar.xz` | ~222KB | 同上，自动按 `GITLAB_PAGES_VERSION`(commit 2d40411) 克隆（可选） |
 | `ruby-3.3.9.tar.gz` | ~20MB | `https://cache.ruby-lang.org/pub/ruby/3.3/ruby-3.3.9.tar.gz` |
 | `go1.26.4.linux-amd64.tar.gz` | ~66MB | `https://go.dev/dl/go1.26.4.linux-amd64.tar.gz` |
-| `node-v20.18.0-linux-x64.tar.xz` | ~25MB | `https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-x64.tar.xz` |
+| `node-v22.20.0-linux-x64.tar.xz` | ~29MB | `https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz` |
 
 ### 版本要求对照 (GitLab 19.3)
 
@@ -240,7 +240,7 @@ bash build/clean_gitlab.sh source --data
 |------|---------|--------|------|
 | Ruby | 3.3.9 | `RUBY_VERSION` | 手动下载 |
 | Go | 1.26.4 | `GO_VERSION` | 手动下载 |
-| Node.js | 20.18.0 | `NODE_VERSION` | 手动下载 |
+| Node.js | 22.20.0 | `NODE_VERSION` | 手动下载 |
 | Gitaly | commit 49c6beca | `GITALY_SERVER_VERSION` | 从 gitlab-foss 读取 |
 | GitLab Shell | v14.56.1 | `GITLAB_SHELL_VERSION` | 从 gitlab-foss 读取 |
 | Workhorse | 含于 gitlab-foss 包内 | `GITLAB_WORKHORSE_VERSION` | 从 gitlab-foss 读取 |
@@ -260,7 +260,7 @@ bash build/clean_gitlab.sh source --data
 - RPM: `https://mirrors.tuna.tsinghua.edu.cn/gitlab-ce/yum/el9/`
 - Ruby: `https://cache.ruby-lang.org/pub/ruby/3.3/`
 - Go: `https://go.dev/dl/`
-- Node.js: `https://nodejs.org/dist/v20.18.0/`
+- Node.js: `https://nodejs.org/dist/v22.20.0/`
 
 ---
 
