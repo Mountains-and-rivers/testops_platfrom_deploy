@@ -100,34 +100,59 @@ id git &>/dev/null && info "  ✓ git 用户" || { warn "  ✗ git 用户不存�
     || { warn "  ✗ workhorse 未编译: ${WORKHORSE_DIR}"; FAILED=1; }
 
 # 检查 PostgreSQL 运行
-# pg_config/psql 可能安装在 /usr/pgsql-*/bin，不在默认 PATH
-export PATH="/usr/pgsql-18/bin:/usr/pgsql-17/bin:/usr/pgsql-16/bin:${PATH}"
+export PATH="/usr/pgsql-18/bin:/usr/pgsql-17/bin:/usr/pgsql-16/bin:/usr/local/ruby/bin:${PATH}"
 
-if systemctl is-active postgresql &>/dev/null; then
-    info "  ✓ PostgreSQL 运行中"
-elif pg_isready &>/dev/null 2>&1; then
-    info "  ✓ PostgreSQL 运行中"
+if ${REMOTE}; then
+    # 远程模式：TCP 连接检测
+    if PGPASSWORD="${PG_PASSWORD}" psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -tAc 'SELECT 1' &>/dev/null 2>&1; then
+        info "  ✓ PostgreSQL 远程连接正常 (${PG_HOST}:${PG_PORT})"
+    elif command -v pg_isready &>/dev/null && pg_isready -h "${PG_HOST}" -p "${PG_PORT}" &>/dev/null 2>&1; then
+        info "  ✓ PostgreSQL 远程可达 (${PG_HOST}:${PG_PORT})"
+    else
+        warn "  ✗ PostgreSQL 远程不可达 (${PG_HOST}:${PG_PORT})"; FAILED=1
+    fi
 else
-    warn "  ✗ PostgreSQL 未运行，请先: systemctl start postgresql"; FAILED=1
+    if systemctl is-active postgresql &>/dev/null; then
+        info "  ✓ PostgreSQL 运行中"
+    elif pg_isready &>/dev/null 2>&1; then
+        info "  ✓ PostgreSQL 运行中"
+    else
+        warn "  ✗ PostgreSQL 未运行，请先: systemctl start postgresql"; FAILED=1
+    fi
 fi
 
 # 检查 btree_gist 扩展（GitLab schema 需要）
-# pg_config 可能不在 PATH 中，同时尝试通配路径
-PG_LIBDIR=$(pg_config --pkglibdir 2>/dev/null || ls -d /usr/pgsql-*/lib 2>/dev/null | head -1 || echo "/usr/pgsql-17/lib")
-if [ -f "${PG_LIBDIR}/btree_gist.so" ]; then
-    info "  ✓ btree_gist 扩展可用"
+if ${REMOTE}; then
+    # 远程模式：通过 psql 检测扩展是否可用
+    if PGPASSWORD="${PG_PASSWORD}" psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -tAc "SELECT 1 FROM pg_available_extensions WHERE name='btree_gist'" 2>/dev/null | grep -q 1; then
+        info "  ✓ btree_gist 扩展可用（远程）"
+    else
+        warn "  ✗ btree_gist 扩展缺失，请在 PG 服务器 (${PG_HOST}) 上安装 postgresql-contrib"; FAILED=1
+    fi
 else
-    warn "  ✗ btree_gist.so 缺失，尝试安装 postgresql18-contrib..."
-    PG_MAJOR_VER=$(psql --version 2>&1 | awk '{print $3}' | cut -d. -f1)
-    dnf install -y "postgresql${PG_MAJOR_VER}-contrib" 2>/dev/null \
-        || rpm -ivh "https://download.postgresql.org/pub/repos/yum/${PG_MAJOR_VER}/redhat/rhel-9-x86_64/postgresql${PG_MAJOR_VER}-contrib-${PG_MAJOR_VER}.4-1PGDG.rhel9.x86_64.rpm" 2>/dev/null \
-        || warn "  ✗ 自动安装失败，请手动安装 postgresql${PG_MAJOR_VER}-contrib"
-    [ -f "${PG_LIBDIR}/btree_gist.so" ] && info "  ✓ btree_gist 扩展已修复" || FAILED=1
+    PG_LIBDIR=$(pg_config --pkglibdir 2>/dev/null || ls -d /usr/pgsql-*/lib 2>/dev/null | head -1 || echo "/usr/pgsql-17/lib")
+    if [ -f "${PG_LIBDIR}/btree_gist.so" ]; then
+        info "  ✓ btree_gist 扩展可用"
+    else
+        warn "  ✗ btree_gist.so 缺失，尝试安装 postgresql18-contrib..."
+        PG_MAJOR_VER=$(psql --version 2>&1 | awk '{print $3}' | cut -d. -f1)
+        dnf install -y "postgresql${PG_MAJOR_VER}-contrib" 2>/dev/null \
+            || rpm -ivh "https://download.postgresql.org/pub/repos/yum/${PG_MAJOR_VER}/redhat/rhel-9-x86_64/postgresql${PG_MAJOR_VER}-contrib-${PG_MAJOR_VER}.4-1PGDG.rhel9.x86_64.rpm" 2>/dev/null \
+            || warn "  ✗ 自动安装失败，请手动安装 postgresql${PG_MAJOR_VER}-contrib"
+        [ -f "${PG_LIBDIR}/btree_gist.so" ] && info "  ✓ btree_gist 扩展已修复" || FAILED=1
+    fi
 fi
 
 # 检查 Redis 运行
-systemctl is-active redis &>/dev/null && info "  ✓ Redis 运行中" \
-    || { warn "  ✗ Redis 未运行，请先: systemctl start redis"; FAILED=1; }
+if ${REMOTE}; then
+    # 远程模式：TCP 连接检测
+    redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" -a "${REDIS_PASSWORD}" --no-auth-warning ping 2>/dev/null | grep -q PONG \
+        && info "  ✓ Redis 远程连接正常 (${REDIS_HOST}:${REDIS_PORT})" \
+        || { warn "  ✗ Redis 远程不可达 (${REDIS_HOST}:${REDIS_PORT})"; FAILED=1; }
+else
+    systemctl is-active redis &>/dev/null && info "  ✓ Redis 运行中" \
+        || { warn "  ✗ Redis 未运行，请先: systemctl start redis"; FAILED=1; }
+fi
 
 # 检查 Ruby 可用
 sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bash -c 'ruby --version' &>/dev/null && info "  ✓ Ruby 可用" \
