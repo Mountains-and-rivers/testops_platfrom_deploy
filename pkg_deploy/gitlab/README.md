@@ -34,7 +34,7 @@ bash build/install_gitlab.sh docker 19.3.0-pre 192.168.0.104
 
 ```bash
 # 前置：PostgreSQL 16 + Redis 7
-bash ../postgresql17/install_postgresql.sh
+bash ../postgresql18/install_postgresql.sh
 bash ../redis7/install_redis.sh
 
 # 第 1 步：编译构建（~30-60 分钟）
@@ -166,7 +166,7 @@ sudo -u git -H vim config/cable.yml      # Redis
 
 | 组件 | 脚本 | 最低版本 |
 |------|------|---------|
-| PostgreSQL 16+ | `../postgresql17/install_postgresql.sh` | 16.x |
+| PostgreSQL 18+ | `../postgresql18/install_postgresql.sh` | 18.x |
 | Redis 7+ | `../redis7/install_redis.sh` | 7.x |
 
 ---
@@ -278,5 +278,15 @@ bash build/clean_gitlab.sh source --data
 | 资源 | Omnibus | Docker | 源码构建 |
 |------|---------|--------|---------|
 | CPU | 2 Cores | 2 Cores | 4+ Cores |
-| 内存 | 4 GB | 4 GB | 8+ GB |
+| 内存 | 4 GB | 4 GB | **16 GB（强烈建议）** |
 | 磁盘 | 20 GB | 20 GB | 50+ GB
+
+> ⚠️ **内存警告**  
+> GitLab 官方要求源码安装最低 **8 GB RAM**，但实际编译前端资源（webpack）时  
+> package.json 中硬编码了 `NODE_OPTIONS="--max-old-space-size=10240"`（10 GB 堆），  
+> 加上 PostgreSQL / Redis / Gitaly / Puma 等运行时服务，**8 GB 极易 OOM**。  
+>   
+> **实测结论：** 7.3 GB 机器即使关掉全部服务也编译失败；**16 GB** 可正常完成。  
+>   
+> 如果内存不足，唯一正规缓解办法：**编译前关掉所有 GitLab 服务释放内存，编译完再启动**。  
+> 安装脚本已自动处理（Step 3 编译前自动 stop Puma/Sidekiq，编译后 restart）。

@@ -6,7 +6,7 @@
 # ============================================================
 set -euo pipefail
 
-PG_MAJOR="${PG_MAJOR:-17}"
+PG_MAJOR="${PG_MAJOR:-18}"
 REMOVE_DATA=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -41,20 +41,34 @@ pkill -9 postgres 2>/dev/null || true
 sleep 2
 
 step "[2/5] 移除 RPM..."
-# 先清除 RPM 包再删目录，避免 RPM 数据库不一致
-for pkg in postgresql17-server postgresql17 postgresql17-libs postgresql17-contrib \
-           postgresql16-server postgresql16 postgresql16-libs postgresql16-contrib; do
+# 严格按依赖顺序：devel → server → client → libs → contrib
+# rpm -e 失败不静默，输出原因方便排查
+_PG_REMOVE_LIST=(
+    postgresql18-devel postgresql18-server postgresql18 postgresql18-libs postgresql18-contrib
+    postgresql17-devel postgresql17-server postgresql17 postgresql17-libs postgresql17-contrib
+    postgresql16-devel postgresql16-server postgresql16 postgresql16-libs postgresql16-contrib
+)
+for pkg in "${_PG_REMOVE_LIST[@]}"; do
     if rpm -q "${pkg}" &>/dev/null 2>&1; then
-        rpm -e --nodeps "${pkg}" 2>/dev/null && info "  ${pkg} 已移除" \
-            || warn "  ${pkg} 移除失败（可能已卸载）"
+        if rpm -e --nodeps "${pkg}" 2>&1; then
+            info "  ${pkg} 已移除"
+        else
+            warn "  ${pkg} 移除失败（尝试 --allmatches）"
+            rpm -e --nodeps --allmatches "${pkg}" 2>&1 || true
+        fi
     fi
 done
 
+# 二次确认无残留
+_PG_LEFT=$(rpm -qa 2>/dev/null | grep -E '^postgresql(18|17|16)-(server|libs|contrib|devel)' || true)
+if [ -n "${_PG_LEFT}" ]; then
+    warn "  仍有 RPM 残留: ${_PG_LEFT}"
+    rpm -e --nodeps ${_PG_LEFT} 2>/dev/null || true
+fi
+
 step "[3/5] 清理安装目录..."
-# 只在 RPM 卸载后才删目录
-for d in /usr/pgsql-16 /usr/pgsql-17; do
+for d in /usr/pgsql-18 /usr/pgsql-17 /usr/pgsql-16; do
     if [ -d "${d}" ]; then
-        # 二次确认：该目录不应再有 RPM 包引用
         if rpm -qa 2>/dev/null | grep -q "$(basename ${d})"; then
             warn "  ${d} 仍有 RPM 残留，跳过删除"
         else

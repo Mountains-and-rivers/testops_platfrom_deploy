@@ -14,6 +14,23 @@ set -euo pipefail
 GITLAB_DOMAIN="${1:-gitlab.testops.local}"
 GITLAB_PORT="${GITLAB_PORT:-80}"
 ROOT_PASS="${GITLAB_ROOT_PASSWORD:-Gitlab12345}"
+
+# 加载远程 Redis / PostgreSQL 配置（默认连接本机）
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
+if [ -f "${_SCRIPT_DIR}/gitlab_remote.conf" ]; then
+    source "${_SCRIPT_DIR}/gitlab_remote.conf"
+fi
+# 默认值（remote.conf 不存在或未设置时）
+REMOTE="${REMOTE:-false}"
+PG_HOST="${PG_HOST:-127.0.0.1}"
+PG_PORT="${PG_PORT:-5432}"
+PG_USER="${PG_USER:-postgres}"
+PG_PASSWORD="${PG_PASSWORD:-Pg1@zendao2024}"
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-Pg1@zendao2024}"
+# Redis URL 中 @ 需编码为 %40
+_REDIS_PW_ENCODED="${REDIS_PASSWORD//@/%40}"
 GITLAB_HOME="${GITLAB_HOME:-/home/git}"
 GITLAB_DIR="${GITLAB_HOME}/gitlab"
 GITALY_DIR="${GITLAB_HOME}/gitaly"
@@ -52,6 +69,14 @@ echo "============================================"
 # 0. 环境检查
 # ═══════════════════════════════════════════════
 step "[0/7] 环境检查..."
+
+# 修复 Windows CRLF 换行符（源码包在 Windows 解压后可能残留 \\r）
+if grep -q $'\\r' "${GITLAB_DIR}/bin/sidekiq-cluster" 2>/dev/null; then
+    info "  修复 CRLF 换行符..."
+    find "${GITLAB_DIR}/bin" "${GITLAB_DIR}/scripts" /etc/systemd/system/gitlab-*.service \
+        -type f -exec sed -i 's/\\r//g' {} + 2>/dev/null || true
+    info "  ✓ CRLF 已修复"
+fi
 FAILED=0
 
 # 检查 git 用户
@@ -75,6 +100,9 @@ id git &>/dev/null && info "  ✓ git 用户" || { warn "  ✗ git 用户不存�
     || { warn "  ✗ workhorse 未编译: ${WORKHORSE_DIR}"; FAILED=1; }
 
 # 检查 PostgreSQL 运行
+# pg_config/psql 可能安装在 /usr/pgsql-*/bin，不在默认 PATH
+export PATH="/usr/pgsql-18/bin:/usr/pgsql-17/bin:/usr/pgsql-16/bin:${PATH}"
+
 if systemctl is-active postgresql &>/dev/null; then
     info "  ✓ PostgreSQL 运行中"
 elif pg_isready &>/dev/null 2>&1; then
@@ -84,11 +112,12 @@ else
 fi
 
 # 检查 btree_gist 扩展（GitLab schema 需要）
-PG_LIBDIR=$(pg_config --pkglibdir 2>/dev/null || echo "/usr/pgsql-17/lib")
+# pg_config 可能不在 PATH 中，同时尝试通配路径
+PG_LIBDIR=$(pg_config --pkglibdir 2>/dev/null || ls -d /usr/pgsql-*/lib 2>/dev/null | head -1 || echo "/usr/pgsql-17/lib")
 if [ -f "${PG_LIBDIR}/btree_gist.so" ]; then
     info "  ✓ btree_gist 扩展可用"
 else
-    warn "  ✗ btree_gist.so 缺失，尝试安装 postgresql17-contrib..."
+    warn "  ✗ btree_gist.so 缺失，尝试安装 postgresql18-contrib..."
     PG_MAJOR_VER=$(psql --version 2>&1 | awk '{print $3}' | cut -d. -f1)
     dnf install -y "postgresql${PG_MAJOR_VER}-contrib" 2>/dev/null \
         || rpm -ivh "https://download.postgresql.org/pub/repos/yum/${PG_MAJOR_VER}/redhat/rhel-9-x86_64/postgresql${PG_MAJOR_VER}-contrib-${PG_MAJOR_VER}.4-1PGDG.rhel9.x86_64.rpm" 2>/dev/null \
@@ -110,30 +139,39 @@ command -v yarn &>/dev/null && info "  ✓ Yarn 可用" \
 
 [ $FAILED -eq 1 ] && err "依赖检查未通过，请修复后重试"
 
+# ── psql 命令封装（本地用 Unix socket，远程用 TCP）──
+_pg_sql() {
+    if ${REMOTE}; then
+        PGPASSWORD="${PG_PASSWORD}" psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" "$@"
+    else
+        su - postgres -c "psql \"\$@\" " _ "$@"
+    fi
+}
+
 # ═══════════════════════════════════════════════
 # 1. 数据库初始化
 # ═══════════════════════════════════════════════
 step "[1/7] 数据库初始化..."
 
 # 检查数据库是否已存在
-DB_EXISTS=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='gitlabhq_production'\"" 2>/dev/null || echo "0")
+DB_EXISTS=$(_pg_sql -tAc "SELECT 1 FROM pg_database WHERE datname='gitlabhq_production'" 2>/dev/null || echo "0")
 if [ "${DB_EXISTS}" = "1" ]; then
     info "  ✓ 数据库 gitlabhq_production 已存在，跳过初始化"
 else
     info "  创建 git 用户和数据库..."
-    su - postgres -c "psql -d template1 -c \"CREATE USER git CREATEDB;\"" 2>/dev/null || true
-    su - postgres -c "psql -d template1 -c \"ALTER USER git WITH PASSWORD 'Pg1@zendao2024';\"" 2>/dev/null || true
+    _pg_sql -d template1 -c "CREATE USER git CREATEDB;" 2>/dev/null || true
+    _pg_sql -d template1 -c "ALTER USER git WITH PASSWORD '${PG_PASSWORD}';" 2>/dev/null || true
 
     # 扩展（官方要求 pg_trgm + btree_gist + plpgsql）
-    su - postgres -c "psql -d template1 -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"" 2>/dev/null || true
-    su - postgres -c "psql -d template1 -c \"CREATE EXTENSION IF NOT EXISTS btree_gist;\"" 2>/dev/null || true
-    su - postgres -c "psql -d template1 -c \"CREATE EXTENSION IF NOT EXISTS plpgsql;\"" 2>/dev/null || true
+    _pg_sql -d template1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;" 2>/dev/null || true
+    _pg_sql -d template1 -c "CREATE EXTENSION IF NOT EXISTS btree_gist;" 2>/dev/null || true
+    _pg_sql -d template1 -c "CREATE EXTENSION IF NOT EXISTS plpgsql;" 2>/dev/null || true
 
     # 创建数据库
-    su - postgres -c "psql -d template1 -c \"CREATE DATABASE gitlabhq_production OWNER git;\"" 2>/dev/null || true
+    _pg_sql -d template1 -c "CREATE DATABASE gitlabhq_production OWNER git;" 2>/dev/null || true
 
     # 验证
-    DB_EXISTS=$(su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='gitlabhq_production'\"" 2>/dev/null || echo "0")
+    DB_EXISTS=$(_pg_sql -tAc "SELECT 1 FROM pg_database WHERE datname='gitlabhq_production'" 2>/dev/null || echo "0")
     [ "${DB_EXISTS}" = "1" ] && info "  ✓ 数据库创建成功" || err "数据库创建失败"
 fi
 
@@ -145,7 +183,7 @@ step "[2/7] 初始化 GitLab（DB schema + seed）..."
 cd "${GITLAB_DIR}"
 
 # 确保 Redis 配置文件存在且密码正确（@ 需 URL 编码为 %40）
-if [ ! -f config/resque.yml ] || ! grep -q 'Pg1%40zendao2024' config/resque.yml 2>/dev/null; then
+if [ ! -f config/resque.yml ] || ! grep -q "${REDIS_HOST}:${REDIS_PORT}" config/resque.yml 2>/dev/null; then
     info "  生成 resque.yml..."
     cat > config/resque.yml << RESQUEEOF
 development:
@@ -153,12 +191,12 @@ development:
 test:
   url: redis://localhost:6379
 production:
-  url: redis://:Pg1%40zendao2024@127.0.0.1:6379
+  url: redis://:${_REDIS_PW_ENCODED}@${REDIS_HOST}:${REDIS_PORT}
 RESQUEEOF
     chown git:git config/resque.yml
     info "  ✓ resque.yml 已创建"
 fi
-if [ ! -f config/cable.yml ] || ! grep -q 'Pg1%40zendao2024' config/cable.yml 2>/dev/null; then
+if [ ! -f config/cable.yml ] || ! grep -q "${REDIS_HOST}:${REDIS_PORT}" config/cable.yml 2>/dev/null; then
     info "  生成 cable.yml..."
     cat > config/cable.yml << CABLEEOF
 development:
@@ -169,16 +207,16 @@ test:
   url: redis://localhost:6379
 production:
   adapter: redis
-  url: redis://:Pg1%40zendao2024@127.0.0.1:6379
+  url: redis://:${_REDIS_PW_ENCODED}@${REDIS_HOST}:${REDIS_PORT}
 CABLEEOF
     chown git:git config/cable.yml
     info "  ✓ cable.yml 已创建"
 fi
 
 # 检查是否已初始化（有 schema_migrations 表说明已完成）
-SCHEMA_DONE=$(su - postgres -c "psql -tAc \"SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations'\"" gitlabhq_production 2>/dev/null || echo "0")
+SCHEMA_DONE=$(_pg_sql -d gitlabhq_production -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations'" 2>/dev/null || echo "0")
 if [ "${SCHEMA_DONE}" = "1" ]; then
-    ROWS=$(su - postgres -c "psql -tAc \"SELECT count(*) FROM schema_migrations\"" gitlabhq_production 2>/dev/null || echo "0")
+    ROWS=$(_pg_sql -d gitlabhq_production -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null || echo "0")
     info "  ✓ schema_migrations 已存在 (${ROWS} migrations)，跳过 rake gitlab:setup"
 else
     # 先确保 Gitaly 在运行（rake gitlab:setup 需要）
@@ -293,6 +331,12 @@ fi
 # ═══════════════════════════════════════════════
 step "[3/7] 编译前端资源..."
 
+# webpack 编译峰值需 5-6 GB 内存，先停掉 Puma/Sidekiq 释放 ~4 GB
+info "  编译前暂停 Puma / Sidekiq / Workhorse 释放内存..."
+systemctl stop gitlab-puma gitlab-sidekiq gitlab-workhorse 2>/dev/null || true
+sleep 2
+_tmp_services_stopped=true
+
 cd "${GITLAB_DIR}"
 
 # Yarn 安装
@@ -328,9 +372,16 @@ if [ -d "public/assets" ] && [ "$(ls public/assets/ | wc -l)" -gt 10 ]; then
     info "  ✓ public/assets 已编译，跳过 assets:compile"
 else
     info "  编译前端资源（此步骤 5-15 分钟）..."
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production  \
-        || err "前端资源编译失败（可能需要更多内存，建议 >= 8GB）"
+    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:$PATH" NODE_OPTIONS="--max-old-space-size=4096" bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production  \
+        || err "前端资源编译失败（机器内存不足，建议 >= 16GB）"
     info "  ✓ 前端资源编译完成"
+fi
+
+# 编译完成后恢复之前暂停的服务
+if ${_tmp_services_stopped:-false}; then
+    info "  编译完成，恢复 Puma / Sidekiq / Workhorse..."
+    systemctl start gitlab-puma gitlab-sidekiq gitlab-workhorse 2>/dev/null || true
+    sleep 3
 fi
 
 # ═══════════════════════════════════════════════
@@ -467,6 +518,14 @@ chown -R git:git "${LOG_DIR}" /data/gitlab
 chmod 755 "${LOG_DIR}"
 
 info "  ✓ Systemd 服务就绪"
+
+# 确保 Puma 监听 TCP 端口（非仅 Unix socket）
+if [ -f "${GITLAB_DIR}/config/puma.rb" ]; then
+    if ! grep -q 'port 3000' "${GITLAB_DIR}/config/puma.rb" 2>/dev/null; then
+        sudo -u git -H sed -i 's|bind .unix://.*|port 3000|' "${GITLAB_DIR}/config/puma.rb"
+        info "  ✓ Puma 端口已设为 3000"
+    fi
+fi
 
 # ═══════════════════════════════════════════════
 # 5. 启动服务

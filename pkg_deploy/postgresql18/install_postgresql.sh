@@ -1,25 +1,27 @@
 #!/bin/bash
 # ============================================================
-# PostgreSQL 17.4 — 裸机单机部署（CentOS 9）
+# PostgreSQL 18.4 — 裸机单机部署（CentOS 9）
 #
 # 安装方式: 二进制 RPM（PGDG 官方仓库）/ 源码编译（TODO）
-# 包名:     postgresql17-{server,libs}-17.4-1PGDG.rhel9.x86_64.rpm
+# 包名:     postgresql18-{server,libs}-18.4-1PGDG.rhel9.x86_64.rpm
 # 本地优先: 脚本同目录 → /tmp/build-cache/（3 个 rpm 缺一不可）
 #
-# 用法:     bash install_postgresql.sh [--port 5432] [--password Pg1@zendao2024]
+# 用法:     bash install_postgresql.sh [--port 5432] [--password Pg1@zendao2024] [--bind '*']
 # ============================================================
 set -euo pipefail
 cd /tmp
 
 # ── 配置 ──
-PG_VERSION="17.4"
-PG_MAJOR="17"
-PG_RPM_SERVER="postgresql${PG_MAJOR}-server-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
-PG_RPM_CLIENT="postgresql${PG_MAJOR}-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
-PG_RPM_LIBS="postgresql${PG_MAJOR}-libs-${PG_VERSION}-1PGDG.rhel9.x86_64.rpm"
+PG_VERSION="18.4"
+PG_MAJOR="18"
+# RPM 文件名通配（兼容不同 build number 和 el9 子版本）
+PG_RPM_SERVER="postgresql${PG_MAJOR}-server-${PG_VERSION}-*.rpm"
+PG_RPM_CLIENT="postgresql${PG_MAJOR}-${PG_VERSION}-*.rpm"
+PG_RPM_LIBS="postgresql${PG_MAJOR}-libs-${PG_VERSION}-*.rpm"
 PG_ROOT_PASSWORD='Pg1@zendao2024'
 PG_DATABASE="zendao"
 PG_PORT="${PG_PORT:-5432}"
+PG_BIND="${PG_BIND:-*}"
 INSTALL_DIR="/usr/pgsql-${PG_MAJOR}"                # RPM 安装路径
 DATA_DIR="${DATA_DIR:-/data/postgresql}"             # 数据目录
 LOG_DIR="${LOG_DIR:-/var/log/postgresql}"
@@ -28,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --port) PG_PORT="$2"; shift 2 ;;
         --password) PG_ROOT_PASSWORD="$2"; shift 2 ;;
+        --bind) PG_BIND="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
@@ -37,13 +40,19 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
-err()   { echo -e "\n${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${RED}  ✗ ${BASH_SOURCE[0]}:${BASH_LINENO[0]}${NC}"; echo -e "${RED}  $*${NC}"; echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; exit 1; }
+err()   { echo -e "\n${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${RED}  ✗ $0:${BASH_LINENO[0]}${NC}"; echo -e "${RED}  $*${NC}"; echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; exit 1; }
 trap 'err "脚本异常退出 (exit code=$?)"' ERR
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
+SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)"
 
 get_local() {
     for d in "${SCRIPT_DIR}/" "/tmp/build-cache/" "./" "${HOME}/"; do
-        [ -f "${d}$1" ] && [ -s "${d}$1" ] && { echo "${d}$1"; return 0; }
+        # 支持通配符匹配（如 postgresql18-libs-18.4-*.rpm）
+        local found
+        found=$(ls "${d}"$1 2>/dev/null | head -1) || true
+        if [ -n "${found}" ] && [ -s "${found}" ]; then
+            echo "${found}"
+            return 0
+        fi
     done
     return 1
 }
@@ -51,15 +60,18 @@ get_local() {
 echo "============================================"
 echo "  PostgreSQL ${PG_VERSION} 单机部署（CentOS 9）"
 echo "  方式: 二进制 RPM（PGDG） |  端口: ${PG_PORT}"
-echo "  数据: ${DATA_DIR}"
+echo "  绑定: ${PG_BIND} (远程连接已开启) |  数据: ${DATA_DIR}"
 echo "============================================"
 
 # ═══ 0. 已安装检测 ═══
 step "[0/6] 检查已安装..."
-if [ -f "${INSTALL_DIR}/bin/postgres" ] && ${INSTALL_DIR}/bin/postgres --version &>/dev/null 2>&1; then
+# 只有在二进制存在、数据目录有效、服务能启动时才跳过
+if [ -f "${INSTALL_DIR}/bin/postgres" ] && ${INSTALL_DIR}/bin/postgres --version &>/dev/null 2>&1 \
+    && [ -f "${DATA_DIR}/PG_VERSION" ]; then
     ver=$(${INSTALL_DIR}/bin/postgres --version 2>&1 | awk '{print $3}')
     info "  已安装 PostgreSQL ${ver}"
-    systemctl is-active postgresql &>/dev/null || systemctl start postgresql 2>/dev/null || true
+    systemctl is-active postgresql &>/dev/null || systemctl is-active "postgresql-${PG_MAJOR}" &>/dev/null \
+        || systemctl start postgresql 2>/dev/null || systemctl start "postgresql-${PG_MAJOR}" 2>/dev/null || true
     info "  跳过安装"; exit 0
 fi
 systemctl stop postgresql 2>/dev/null || true
@@ -80,32 +92,30 @@ for _pkg in postgresql${PG_MAJOR} postgresql${PG_MAJOR}-libs postgresql${PG_MAJO
     fi
 done
 
-RPM_LIST=("${PG_RPM_LIBS}" "${PG_RPM_CLIENT}" "${PG_RPM_SERVER}")
-ALL_LOCAL=true
-for rpm in "${RPM_LIST[@]}"; do
-    if pkg=$(get_local "${rpm}"); then
-        cp "${pkg}" "/tmp/${rpm}"
-        info "  ✓ $(basename ${pkg})"
-    else
-        ALL_LOCAL=false
-        break
-    fi
-done
+# 清理可能残留的 dnf/yum 锁（上次 Ctrl+C 中断导致）
+pkill -9 dnf 2>/dev/null || true
+rm -f /var/lib/rpm/.rpm.lock /var/cache/dnf/*/lock* 2>/dev/null || true
 
-if ${ALL_LOCAL}; then
-    info "  全部本地就绪，开始安装..."
-    rpm -ivh /tmp/${PG_RPM_LIBS} /tmp/${PG_RPM_CLIENT} /tmp/${PG_RPM_SERVER} 2>&1 || {
-        warn "  rpm -ivh 失败，尝试 dnf localinstall..."
-        dnf localinstall -y /tmp/${PG_RPM_LIBS} /tmp/${PG_RPM_CLIENT} /tmp/${PG_RPM_SERVER} 2>&1 || err "RPM 安装失败"
-    }
-    rm -f /tmp/${PG_RPM_LIBS} /tmp/${PG_RPM_CLIENT} /tmp/${PG_RPM_SERVER}
+# 优先本地 RPM（脚本同目录 → /tmp/build-cache → ./ → $HOME），无则在线 dnf
+_LOCAL_LIBS=$(get_local "${PG_RPM_LIBS}") || true
+_LOCAL_CLIENT=$(get_local "${PG_RPM_CLIENT}") || true
+_LOCAL_SERVER=$(get_local "${PG_RPM_SERVER}") || true
+
+if [ -n "${_LOCAL_LIBS}" ] && [ -n "${_LOCAL_CLIENT}" ] && [ -n "${_LOCAL_SERVER}" ]; then
+    info "  ✓ 本地 RPM 就绪，安装..."
+    rpm -Uvh "${_LOCAL_LIBS}" "${_LOCAL_CLIENT}" "${_LOCAL_SERVER}" 2>&1 || true
+    if [ ! -f "${INSTALL_DIR}/bin/postgres" ]; then
+        warn "  rpm -Uvh 未成功，尝试 dnf localinstall..."
+        dnf localinstall -y "${_LOCAL_LIBS}" "${_LOCAL_CLIENT}" "${_LOCAL_SERVER}" 2>&1 || true
+    fi
 else
-    PG_RPM_BASE="https://download.postgresql.org/pub/repos/yum/${PG_MAJOR}/redhat/rhel-9-x86_64"
-    info "  本地 RPM 不完整，尝试 dnf 在线安装（3 个 RPM）..."
-    dnf install -y \
-        "${PG_RPM_BASE}/${PG_RPM_LIBS}" \
-        "${PG_RPM_BASE}/${PG_RPM_CLIENT}" \
-        "${PG_RPM_BASE}/${PG_RPM_SERVER}" 2>&1 || err "在线安装失败"
+    info "  本地 RPM 不完整，尝试 dnf 在线安装..."
+    dnf install -y postgresql${PG_MAJOR}-server postgresql${PG_MAJOR} postgresql${PG_MAJOR}-libs 2>&1 || true
+fi
+
+# 最终验证
+if [ ! -f "${INSTALL_DIR}/bin/postgres" ]; then
+    err "安装失败: ${INSTALL_DIR}/bin/postgres 不存在（请检查网络或本地 RPM 包）"
 fi
 
 # 验证
@@ -118,8 +128,10 @@ step "[2/6] 初始化数据库..."
 # PGDG RPM 会创建 postgres 用户（如果没有的话）
 id postgres &>/dev/null || { groupadd postgres 2>/dev/null || true; useradd -r -g postgres -s /bin/bash postgres 2>/dev/null || true; }
 
-mkdir -p "${DATA_DIR}" "${LOG_DIR}"
-chown postgres:postgres "${DATA_DIR}" "${LOG_DIR}"
+mkdir -p "${DATA_DIR}" "${LOG_DIR}" 2>/dev/null || true
+chown postgres:postgres "${DATA_DIR}" "${LOG_DIR}" 2>/dev/null || true
+# 确保父目录可写
+chmod 750 "${DATA_DIR}" 2>/dev/null || true
 
 # 检查是否已初始化（版本不匹配则重建）
 if [ -f "${DATA_DIR}/PG_VERSION" ]; then
@@ -139,9 +151,9 @@ if [ ! -f "${DATA_DIR}/PG_VERSION" ]; then
     info "  ✓ initdb 完成"
 fi
 
-# 写入 postgresql.conf
+# 写入 postgresql.conf（覆盖默认，确保远程连接和端口正确）
 cat > "${DATA_DIR}/postgresql.conf" << CONF
-listen_addresses = '*'
+listen_addresses = '${PG_BIND}'
 port = ${PG_PORT}
 max_connections = 200
 shared_buffers = 256MB
@@ -150,7 +162,7 @@ log_directory = '${LOG_DIR}'
 log_filename = 'postgresql-%a.log'
 CONF
 
-# 允许远程连接
+# 允许远程连接（pg_hba.conf）
 grep -q "^host all all 0.0.0.0/0" "${DATA_DIR}/pg_hba.conf" 2>/dev/null \
     || echo "host all all 0.0.0.0/0 md5" >> "${DATA_DIR}/pg_hba.conf"
 chown -R postgres:postgres "${DATA_DIR}"
@@ -285,17 +297,21 @@ echo "  ── 账号信息 ──"
 echo "  用户名: postgres"
 echo "  密码:   ${PG_ROOT_PASSWORD}"
 echo "  数据库: ${PG_DATABASE}"
+echo "  绑定地址: ${PG_BIND} (远程连接已开启)"
 echo ""
 echo "  ── 连接命令 ──"
 echo "  # 本地 socket 连接（免密）"
 echo "  sudo -u postgres psql"
 echo ""
-echo "  # TCP 密码连接"
+echo "  # 本地 TCP 密码连接"
 echo "  psql -U postgres -h 127.0.0.1 -p ${PG_PORT}"
 echo "  # 输入密码: ${PG_ROOT_PASSWORD}"
 echo ""
+echo "  # 远程连接（从其他机器）"
+echo "  psql -U postgres -h $(hostname -I 2>/dev/null | awk '{print $1}' || echo '<服务器IP>') -p ${PG_PORT}"
+echo ""
 echo "  # 环境变量方式"
-echo "  PGPASSWORD='${PG_ROOT_PASSWORD}' psql -U postgres -h 127.0.0.1 -p ${PG_PORT}"
+echo "  PGPASSWORD='${PG_ROOT_PASSWORD}' psql -U postgres -h <服务器IP> -p ${PG_PORT}"
 echo ""
 echo "  ── 管理命令 ──"
 echo "  systemctl status ${SERVICE_NAME}"

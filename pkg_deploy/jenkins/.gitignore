@@ -1,3 +1,14 @@
-# 大文件压缩包，不上传 git，请参考 filelist.txt 手动下载
+# 二进制 & 压缩包 — 不上传 git，请参考 filelist.txt 手动下载
+*.tar
 *.tar.gz
+*.tar.xz
+*.tar.bz2
+*.tgz
 *.zip
+*.gz
+*.xz
+*.bz2
+*.7z
+*.rar
+*.rpm
+*.deb

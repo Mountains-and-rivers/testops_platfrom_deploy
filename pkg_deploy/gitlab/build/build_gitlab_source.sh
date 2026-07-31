@@ -48,6 +48,20 @@ trap 'err "脚本异常退出 (exit code=$?)"' ERR
 
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
 
+# 加载远程 Redis / PostgreSQL 配置（默认连接本机）
+if [ -f "${_SCRIPT_DIR}/gitlab_remote.conf" ]; then
+    source "${_SCRIPT_DIR}/gitlab_remote.conf"
+fi
+REMOTE="${REMOTE:-false}"
+PG_HOST="${PG_HOST:-127.0.0.1}"
+PG_PORT="${PG_PORT:-5432}"
+PG_USER="${PG_USER:-postgres}"
+PG_PASSWORD="${PG_PASSWORD:-Pg1@zendao2024}"
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-Pg1@zendao2024}"
+_REDIS_PW_ENCODED="${REDIS_PASSWORD//@/%40}"
+
 # ── 本地源码包优先 ──
 # 搜索: 脚本目录 → /tmp/build-cache/
 # 参数: $1=组件名(如 gitlab-foss/gitaly/gitlab-shell/gitlab-pages)
@@ -339,16 +353,18 @@ info "  ✓ git 用户: ${GITLAB_HOME}"
 # ═══════════════════════════════════════════════
 step "[8/13] 检查 PostgreSQL 16+..."
 
+# pg_config/psql 可能安装在 /usr/pgsql-*/bin，不在默认 PATH
+export PATH="/usr/pgsql-18/bin:/usr/pgsql-17/bin:/usr/pgsql-16/bin:${PATH}"
 if command -v psql &>/dev/null && psql --version 2>&1 | grep -qE '1[6-9]\.'; then
     info "  ✓ PostgreSQL $(psql --version | awk '{print $3}')"
 else
     warn "  未检测到 PostgreSQL 16+"
-    PG_SCRIPT="${_SCRIPT_DIR}/../../postgresql17/install_postgresql.sh"
+    PG_SCRIPT="${_SCRIPT_DIR}/../../postgresql18/install_postgresql.sh"
     if [ -f "${PG_SCRIPT}" ]; then
         info "  自动执行: bash ${PG_SCRIPT}"
         bash "${PG_SCRIPT}" || err "PostgreSQL 安装失败"
     else
-        warn "  请手动执行: bash ../postgresql17/install_postgresql.sh"
+        warn "  请手动执行: bash ../postgresql18/install_postgresql.sh"
     fi
 fi
 
@@ -424,9 +440,9 @@ _clean_db_yml() {
 
 if [ ! -f config/database.yml ] || [ ! -s config/database.yml ]; then
     sudo -u git -H cp config/database.yml.postgresql config/database.yml
-    sudo -u git -H sed -i 's|username: git|username: postgres|' config/database.yml
-    sudo -u git -H sed -i 's|password:.*|password: Pg1@zendao2024|' config/database.yml
-    sudo -u git -H sed -i 's|host:.*|host: 127.0.0.1|' config/database.yml
+    sudo -u git -H sed -i "s|username: git|username: ${PG_USER}|" config/database.yml
+    sudo -u git -H sed -i "s|password:.*|password: ${PG_PASSWORD}|" config/database.yml
+    sudo -u git -H sed -i "s|host:.*|host: ${PG_HOST}|" config/database.yml
     _clean_db_yml
     info "  ✓ database.yml"
 else
@@ -456,7 +472,7 @@ fi
 if [ ! -f config/resque.yml ] || [ ! -s config/resque.yml ]; then
     sudo -u git -H cp config/resque.yml.example config/resque.yml 2>/dev/null || true
     # 注入 Redis 密码（@ 需 URL 编码为 %40）
-    sudo -u git -H sed -i 's|url: unix:/var/run/redis/redis.sock|url: redis://:Pg1%40zendao2024@127.0.0.1:6379|' config/resque.yml 2>/dev/null || true
+    sudo -u git -H sed -i "s|url: unix:/var/run/redis/redis.sock|url: redis://:${_REDIS_PW_ENCODED}@${REDIS_HOST}:${REDIS_PORT}|" config/resque.yml 2>/dev/null || true
     info "  ✓ resque.yml"
 else
     info "  ✓ resque.yml (已存在)"
@@ -466,7 +482,7 @@ fi
 if [ ! -f config/cable.yml ] || [ ! -s config/cable.yml ]; then
     sudo -u git -H cp config/cable.yml.example config/cable.yml 2>/dev/null || true
     # 注入 Redis 密码（@ 需 URL 编码为 %40）
-    sudo -u git -H sed -i 's|url:.*|url: redis://:Pg1%40zendao2024@127.0.0.1:6379|' config/cable.yml 2>/dev/null || true
+    sudo -u git -H sed -i "s|url:.*|url: redis://:${_REDIS_PW_ENCODED}@${REDIS_HOST}:${REDIS_PORT}|" config/cable.yml 2>/dev/null || true
     info "  ✓ cable.yml"
 else
     info "  ✓ cable.yml (已存在)"

@@ -1,3 +1,18 @@
+# 二进制 & 压缩包 — 不上传 git
+*.tar
+*.tar.gz
+*.tar.xz
+*.tar.bz2
+*.tgz
+*.zip
+*.gz
+*.xz
+*.bz2
+*.7z
+*.rar
+*.rpm
+*.deb
+
 # 运行时产物
 runtime/
 

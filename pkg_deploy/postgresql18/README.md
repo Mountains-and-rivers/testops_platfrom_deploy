@@ -7,11 +7,14 @@
 ## 一键执行
 
 ```bash
-# 安装（本地 RPM 优先）
+# 安装（本地 RPM 优先，默认开启远程连接）
 bash install_postgresql.sh
 
-# 指定端口和密码
-bash install_postgresql.sh --port 5432 --password MyPass123
+# 指定端口、密码和绑定地址
+bash install_postgresql.sh --port 5432 --password MyPass123 --bind '*'
+
+# 仅监听本地（禁止远程连接）
+bash install_postgresql.sh --bind 127.0.0.1
 
 # 卸载（保留 /data/postgresql）
 bash uninstall_postgresql.sh
@@ -106,7 +109,9 @@ postgresql17/
 |------|------|--------|
 | `--port` | 监听端口 | 5432 |
 | `--password` | postgres 用户密码 | Pg1@zendao2024 |
+| `--bind` | 监听地址（`*`=所有网卡，`0.0.0.0`=所有 IPv4） | * |
 | 环境变量 `PG_PORT` | 同 --port | 5432 |
+| 环境变量 `PG_BIND` | 同 --bind | * |
 | 环境变量 `DATA_DIR` | 数据目录 | /data/postgresql |
 | 环境变量 `LOG_DIR` | 日志目录 | /var/log/postgresql |
 
@@ -117,10 +122,10 @@ postgresql17/
 | 配置项 | 值 |
 |--------|-----|
 | 安装路径 | `/usr/pgsql` |
-| 监听地址 | `*`（所有网卡） |
+| 监听地址 | `*`（所有网卡，远程连接已开启） |
 | 最大连接 | 200 |
 | shared_buffers | 256MB |
-| 远程认证 | `md5`（0.0.0.0/0） |
+| 远程认证 | `md5`（0.0.0.0/0，密码认证） |
 | 编码 | UTF8 |
 | 开机自启 | `systemctl enable postgresql` |
 | 默认数据库 | `zendao` |
@@ -153,6 +158,31 @@ sudo -u postgres psql                                            # 本地 socket
 psql -U postgres -h 127.0.0.1 -p 5432                            # TCP 密码连接
 PGPASSWORD='Pg1@zendao2024' psql -U postgres -h 127.0.0.1 -p 5432  # 环境变量
 ```
+
+## 远程连接
+
+安装完成后 PostgreSQL 默认已开启远程连接（`listen_addresses = '*'` + `pg_hba.conf` 允许 `0.0.0.0/0 md5`），可从其他机器连接：
+
+```bash
+# 从远程机器连接（替换 <服务器IP> 为实际地址）
+psql -U postgres -h <服务器IP> -p 5432
+# 输入密码: Pg1@zendao2024
+
+# 环境变量方式（密码不显示在命令行）
+PGPASSWORD='Pg1@zendao2024' psql -U postgres -h <服务器IP> -p 5432
+
+# 测试远程连通性
+PGPASSWORD='Pg1@zendao2024' psql -U postgres -h <服务器IP> -p 5432 -c 'SELECT version();'
+```
+
+**安全建议**:
+- 生产环境请修改默认密码（`--password` 参数）
+- 如只需本地访问，使用 `--bind 127.0.0.1` 关闭远程连接
+- 建议配合防火墙白名单限制来源 IP：
+  ```bash
+  firewall-cmd --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="5432" protocol="tcp" accept' --permanent
+  firewall-cmd --reload
+  ```
 
 ## 卸载
 

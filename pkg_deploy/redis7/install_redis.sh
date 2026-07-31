@@ -5,19 +5,20 @@
 # 安装方式: 二进制 RPM / dnf 在线
 # 本地优先: 脚本同目录 → /tmp/build-cache/（redis-*.rpm 通配匹配）
 #
-# 用法:     bash install_redis.sh [--port 6379] [--password Pg1@zendao2024]
+# 用法:     bash install_redis.sh [--port 6379] [--password Pg1@zendao2024] [--bind 0.0.0.0]
 # ============================================================
 set -euo pipefail
 cd /tmp
 
 # ── 配置 ──
-REDIS_VERSION="7.4.1"
+REDIS_VERSION="7.2.14"
 # 源码包（预留源码编译模式使用）
 REDIS_SOURCE_URL="https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz"
 # CentOS 9 AppStream redis:7 模块提供 7.2.x（与 7.4.x API 兼容）
 # 本地 RPM 通配匹配（redis-*.rpm），不硬编码具体文件名
 REDIS_PASSWORD="${REDIS_PASSWORD:-Pg1@zendao2024}"
 REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_BIND="${REDIS_BIND:-0.0.0.0}"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/redis}"
 DATA_DIR="${DATA_DIR:-/data/redis}"
 LOG_DIR="${LOG_DIR:-/var/log/redis}"
@@ -26,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --port) REDIS_PORT="$2"; shift 2 ;;
         --password) REDIS_PASSWORD="$2"; shift 2 ;;
+        --bind) REDIS_BIND="$2"; shift 2 ;;
         *) shift ;;
     esac
 done
@@ -49,6 +51,7 @@ get_local() {
 echo "============================================"
 echo "  Redis ${REDIS_VERSION} 单机部署（CentOS 9）"
 echo "  方式: dnf module redis:7 / 本地 RPM |  端口: ${REDIS_PORT}"
+echo "  绑定: ${REDIS_BIND} (远程连接已开启)"
 echo "============================================"
 
 # ═══ 0. 已安装检测 ═══
@@ -152,10 +155,11 @@ chown -R redis:redis "${DATA_DIR}" "${LOG_DIR}"
 
 # 配置文件写到 INSTALL_DIR（兼容源码和 RPM 两种路径）
 cat > "${INSTALL_DIR}/redis.conf" << CONF
-bind 0.0.0.0
+bind ${REDIS_BIND}
 port ${REDIS_PORT}
 daemonize no
 supervised systemd
+protected-mode no
 pidfile /run/redis.pid
 logfile "${LOG_DIR}/redis.log"
 dir ${DATA_DIR}
@@ -281,6 +285,7 @@ echo "  Redis ${REDIS_VERSION} 安装完成"
 echo ""
 echo "  ── 认证信息 ──"
 echo "  Redis 为单密码认证（无用户名概念）"
+echo "  绑定地址: ${REDIS_BIND} (protected-mode: no, 远程连接已开启)"
 echo "  密码:   ${REDIS_PASSWORD:-（无密码）}"
 echo "  端口:   ${REDIS_PORT}"
 echo ""
@@ -288,11 +293,14 @@ echo "  ── 连接命令 ──"
 echo "  # 本地连接（无密码时）"
 echo "  redis-cli"
 echo ""
-echo "  # TCP 密码连接"
+echo "  # 本地 TCP 密码连接"
 echo "  redis-cli -h 127.0.0.1 -p ${REDIS_PORT} -a '${REDIS_PASSWORD}'"
 echo ""
+echo "  # 远程连接（从其他机器）"
+echo "  redis-cli -h $(hostname -I 2>/dev/null | awk '{print $1}' || echo '<服务器IP>') -p ${REDIS_PORT} -a '${REDIS_PASSWORD}'"
+echo ""
 echo "  # 交互式（先连接再认证，密码不泄露在命令行）"
-echo "  redis-cli -h 127.0.0.1 -p ${REDIS_PORT}"
+echo "  redis-cli -h <服务器IP> -p ${REDIS_PORT}"
 echo "  > AUTH ${REDIS_PASSWORD}"
 echo ""
 echo "  ── 管理命令 ──"

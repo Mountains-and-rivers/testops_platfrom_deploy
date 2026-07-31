@@ -7,11 +7,14 @@
 ## 一键执行
 
 ```bash
-# 安装（本地 RPM 优先）
+# 安装（本地 RPM 优先，默认开启远程连接）
 bash install_redis.sh
 
-# 指定端口和密码
-bash install_redis.sh --port 6379 --password MyPass123
+# 指定端口、密码和绑定地址
+bash install_redis.sh --port 6379 --password MyPass123 --bind 0.0.0.0
+
+# 仅监听本地（禁止远程连接）
+bash install_redis.sh --bind 127.0.0.1
 
 # 卸载（保留 /data/redis）
 bash uninstall_redis.sh
@@ -98,8 +101,10 @@ redis7/
 |------|------|--------|
 | `--port` | 监听端口 | 6379 |
 | `--password` | requirepass 密码 | Pg1@zendao2024 |
+| `--bind` | 绑定地址（0.0.0.0=所有网卡） | 0.0.0.0 |
 | 环境变量 `REDIS_PORT` | 同 --port | 6379 |
 | 环境变量 `REDIS_PASSWORD` | 同 --password | Pg1@zendao2024 |
+| 环境变量 `REDIS_BIND` | 同 --bind | 0.0.0.0 |
 | 环境变量 `DATA_DIR` | 数据目录 | /data/redis |
 | 环境变量 `LOG_DIR` | 日志目录 | /var/log/redis |
 
@@ -109,7 +114,8 @@ redis7/
 
 | 配置项 | 值 |
 |--------|-----|
-| 监听地址 | `0.0.0.0` |
+| 监听地址 | `0.0.0.0`（远程连接已开启） |
+| protected-mode | `no`（允许非 loopback 连接） |
 | 最大内存 | 512MB |
 | 淘汰策略 | `allkeys-lru` |
 | 持久化 | RDB（snapshot）+ AOF（everysec） |
@@ -141,6 +147,32 @@ journalctl -u redis -f         # 日志
 # 连接
 redis-cli -h 127.0.0.1 -p 6379 -a 'Pg1@zendao2024'
 ```
+
+## 远程连接
+
+安装完成后 Redis 默认已开启远程连接（`bind 0.0.0.0` + `protected-mode no`），可从其他机器连接：
+
+```bash
+# 从远程机器连接（替换 <服务器IP> 为实际地址）
+redis-cli -h <服务器IP> -p 6379 -a 'Pg1@zendao2024'
+
+# 交互式（密码不泄露在命令行）
+redis-cli -h <服务器IP> -p 6379
+> AUTH Pg1@zendao2024
+
+# 测试远程连通性
+redis-cli -h <服务器IP> -p 6379 -a 'Pg1@zendao2024' ping
+# 返回: PONG
+```
+
+**安全建议**:
+- 生产环境请修改默认密码（`--password` 参数）
+- 如只需本地访问，使用 `--bind 127.0.0.1` 关闭远程连接
+- 建议配合防火墙白名单限制来源 IP：
+  ```bash
+  firewall-cmd --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="6379" protocol="tcp" accept' --permanent
+  firewall-cmd --reload
+  ```
 
 ## 卸载
 
