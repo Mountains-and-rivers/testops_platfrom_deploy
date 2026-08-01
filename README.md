@@ -96,7 +96,7 @@ testops_platform_deploy/
 │   ├── harbor/                                 # Harbor 镜像仓库部署
 │   ├── jenkins/                                # Jenkins CI/CD 部署
 │   ├── nginx/                                  # Nginx 1.26 二进制 RPM 安装
-│   ├── postgresql17/                           # PostgreSQL 17 二进制 RPM 安装
+│   ├── postgresql18/                           # PostgreSQL 18 二进制 RPM 安装
 │   ├── redis7/                                 # Redis 7 二进制安装
 │   ├── gitlab/                                 # GitLab CE 部署（Omnibus + Docker + 源码）
 │   ├── mysql8.0/                               # MySQL 8.0 部署
@@ -104,7 +104,7 @@ testops_platform_deploy/
 │   ├── java_app_cicd/                          # Java 应用 CI/CD 部署
 │   ├── zentao_cli/                          # 禅道部署 CLI（Python 工程）
 │   ├── wikijs/                          # 后续扩展：Wiki.js文档平台
-│   ├── prometheus_stack/                # 后续扩展：Prometheus监控栈
+│   ├── prometheus/                # 后续扩展：Prometheus监控栈
 │   ├── metersphere/                     # 后续扩展：MeterSphere测试平台
 │   └── ai_test_suite/                   # 后续扩展：AI测试工具集
 │
@@ -152,7 +152,7 @@ testops_platform_deploy/
 | MeterSphere | `pkg_deploy/metersphere/` | ⚠️ 脚本已生成，待测试 | P1 | MeterSphere 3.x（Maven 源码 + Docker） |
 | ELK / ELFK | `pkg_deploy/elk/` | ⚠️ 脚本已生成，待测试 | P1 | Elasticsearch + Logstash + Kibana + Filebeat |
 | Loki 日志方案 | `pkg_deploy/loki/` | ⚠️ 脚本已生成，待测试 | P1 | Loki + Promtail 轻量日志聚合 |
-| Prometheus 监控栈 | `pkg_deploy/prometheus_stack/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager + Node Exporter |
+| Prometheus 监控栈 | `pkg_deploy/prometheus/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager + Node Exporter |
 | MaxKey IAM | `pkg_deploy/maxkey/` | 🔲 规划中 | P2 | MaxKey 统一认证平台 |
 | Dashboard | `pkg_deploy/dashboard/` | 🔲 规划中 | P2 | 监控面板 / 可视化看板 |
 | AI 测试工具集 | `pkg_deploy/ai_test_suite/` | 🔲 规划中 | P3 | AI 辅助测试工具 |
@@ -227,7 +227,7 @@ K8s 平台层:
 python main.py install --all
 
 # 安装指定组件
-python main.py install --components k8s_cluster prometheus_stack
+python main.py install --components k8s_cluster prometheus
 
 # 打印安装计划（不实际执行）
 python main.py install --all --dry-run
