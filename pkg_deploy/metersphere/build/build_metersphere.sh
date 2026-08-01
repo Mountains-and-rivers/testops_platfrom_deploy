@@ -9,6 +9,9 @@
 # 示例:      bash build_metersphere.sh v3.6.0
 # ============================================================
 set -euo pipefail
+
+# 必须在 cd 之前计算脚本目录，否则相对路径 $0 会解析到 /tmp
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
 cd /tmp
 
 # ── 配置 ──
@@ -40,7 +43,6 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
 err()   { echo -e "\n${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${RED}  ✗ ${BASH_SOURCE[0]}:${BASH_LINENO[0]}${NC}"; echo -e "${RED}  $*${NC}"; echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; exit 1; }
 trap 'err "脚本异常退出 (exit code=$?)"' ERR
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
 
 get_local() {
     for d in "${SCRIPT_DIR}/" "/tmp/build-cache/" "./" "${HOME}/"; do

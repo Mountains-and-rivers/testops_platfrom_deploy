@@ -4,7 +4,11 @@
 # 用法: bash install_logstash.sh [--es-host 127.0.0.1:9200]
 # 源码编译: TODO（预留）
 # ============================================================
-set -euo pipefail; cd /tmp
+set -euo pipefail
+
+# 必须在 cd 之前计算脚本目录，否则相对路径 $0 会解析到 /tmp
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
+cd /tmp
 
 LS_VERSION="${LS_VERSION:-8.17.0}"
 LS_TAR="logstash-${LS_VERSION}-linux-x86_64.tar.gz"
@@ -24,7 +28,6 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }; warn()  { echo -e "${YELLOW}[WAR
 step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
 err()   { echo -e "\n${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${RED}  ✗ ${BASH_SOURCE[0]}:${BASH_LINENO[0]}${NC}"; echo -e "${RED}  $*${NC}"; echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; exit 1; }
 trap 'err "脚本异常退出 (exit code=$?)"' ERR
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
 get_local() { for d in "${SCRIPT_DIR}/" "/tmp/build-cache/" "./" "${HOME}/"; do [ -f "${d}$1" ] && [ -s "${d}$1" ] && { echo "${d}$1"; return 0; }; done; return 1; }
 
 echo "============================================"

@@ -10,7 +10,11 @@
 # TODO: 源码编译模式（预留）
 #   - [ ] git clone https://github.com/grafana/loki.git → make loki
 # ═══════════════════════════════════════════════
-set -euo pipefail; cd /tmp
+set -euo pipefail
+
+# 必须在 cd 之前计算脚本目录，否则相对路径 $0 会解析到 /tmp
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
+cd /tmp
 
 LOKI_VERSION="${LOKI_VERSION:-3.4.0}"
 LOKI_ZIP="loki-linux-amd64.zip"
@@ -28,7 +32,6 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }; warn()  { echo -e "${YELLOW}[WAR
 step()  { echo -e "${CYAN}[STEP]${NC}  $*"; }
 err()   { echo -e "\n${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${RED}  ✗ ${BASH_SOURCE[0]}:${BASH_LINENO[0]}${NC}"; echo -e "${RED}  $*${NC}"; echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"; exit 1; }
 trap 'err "脚本异常退出 (exit code=$?)"' ERR
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
 get_local() { for d in "${SCRIPT_DIR}/" "/tmp/build-cache/" "./" "${HOME}/"; do [ -f "${d}$1" ] && [ -s "${d}$1" ] && { echo "${d}$1"; return 0; }; done; return 1; }
 
 echo "============================================"
