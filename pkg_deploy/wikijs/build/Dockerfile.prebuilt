@@ -1,0 +1,27 @@
+# ============================================================
+# Wiki.js — 预编译 Dockerfile（裸机构建 WAR 后快速打包）
+# 前提: 已执行 bash build_wikijs.sh（产出 /opt/wiki）
+# ============================================================
+FROM quay.io/centos/centos:stream9
+
+RUN dnf install -y glibc-langpack-en && dnf clean all
+ENV LANG=en_US.UTF-8
+
+# 复制预编译 Wiki.js
+COPY /opt/wiki /opt/wiki
+
+# 软链 Node（假设已安装到 /usr/local/node）
+COPY /usr/local/node/bin/node /usr/local/bin/node
+RUN ln -s /usr/local/bin/node /usr/bin/node || true
+
+RUN groupadd -r wiki && useradd -r -g wiki -s /bin/false wiki && \
+    mkdir -p /data/wiki /var/log/wiki && \
+    chown -R wiki:wiki /opt/wiki /data/wiki /var/log/wiki
+
+COPY build/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 3000
+USER wiki
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["node", "server"]

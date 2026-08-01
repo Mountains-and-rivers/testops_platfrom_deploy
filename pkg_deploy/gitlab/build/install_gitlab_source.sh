@@ -70,12 +70,21 @@ echo "============================================"
 # ═══════════════════════════════════════════════
 step "[0/7] 环境检查..."
 
-# 修复 Windows CRLF 换行符（源码包在 Windows 解压后可能残留 \\r）
-if grep -q $'\\r' "${GITLAB_DIR}/bin/sidekiq-cluster" 2>/dev/null; then
-    info "  修复 CRLF 换行符..."
-    find "${GITLAB_DIR}/bin" "${GITLAB_DIR}/scripts" /etc/systemd/system/gitlab-*.service \
-        -type f -exec sed -i 's/\\r//g' {} + 2>/dev/null || true
-    info "  ✓ CRLF 已修复"
+# 修复 Windows CRLF 换行符（源码包在 Windows 解压后可能残留 \r）
+# 扫描关键目录，全量清理（scripts/ config/ bin/ 等），不留死角
+_CRLF_FILES=$(grep -rl $'\r' "${GITLAB_DIR}/scripts" "${GITLAB_DIR}/bin" "${GITLAB_DIR}/config" 2>/dev/null | wc -l || echo 0)
+if [ "${_CRLF_FILES}" -gt 0 ]; then
+    info "  检测到 ${_CRLF_FILES} 个文件含 Windows 换行符，开始清理..."
+    # 用 find -exec 替代 xargs（规避 ARG_MAX 参数上限）
+    find "${GITLAB_DIR}/scripts" "${GITLAB_DIR}/bin" "${GITLAB_DIR}/config" -type f \
+        -exec grep -lq $'\r' {} \; -exec sed -i 's/\r//g' {} + 2>/dev/null || true
+    # 也修复已知会导致 Permission denied 的脚本文件
+    for _f in "${GITLAB_DIR}/scripts/build_frontend_islands" "${GITLAB_DIR}/scripts/frontend/start_storybook.sh"; do
+        [ -f "${_f}" ] && sed -i 's/\r//g' "${_f}" 2>/dev/null || true
+    done
+    # 确认清理后的文件不再含 \r（|| true 防止 pipefail 下 grep 无匹配时 exit 1 触发 ERR）
+    _REMAIN=$(grep -rl $'\r' "${GITLAB_DIR}/scripts" "${GITLAB_DIR}/bin" "${GITLAB_DIR}/config" 2>/dev/null | wc -l || echo 0)
+    info "  ✓ CRLF 已清理（修复前: ${_CRLF_FILES} 个，修复后: ${_REMAIN} 个）"
 fi
 FAILED=0
 
@@ -238,42 +247,29 @@ CABLEEOF
     info "  ✓ cable.yml 已创建"
 fi
 
-# 检查是否已初始化（有 schema_migrations 表说明已完成）
-SCHEMA_DONE=$(_pg_sql -d gitlabhq_production -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations'" 2>/dev/null || echo "0")
-if [ "${SCHEMA_DONE}" = "1" ]; then
-    ROWS=$(_pg_sql -d gitlabhq_production -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null || echo "0")
-    info "  ✓ schema_migrations 已存在 (${ROWS} migrations)，跳过 rake gitlab:setup"
-else
-    # 先确保 Gitaly 在运行（rake gitlab:setup 需要）
-    if ! systemctl is-active gitlab-gitaly &>/dev/null 2>&1; then
-        info "  先启动 Gitaly（rake gitlab:setup 需要）..."
-
-        # 生成 Gitaly config.toml（首次运行时缺失）
-        if [ ! -f "${GITALY_DIR}/config.toml" ]; then
-            info "  生成 Gitaly config.toml..."
-
-            # 确保 .gitlab_shell_secret 存在（包含 gitaly_token）
-            if [ ! -f "${GITLAB_DIR}/.gitlab_shell_secret" ]; then
-                cat > "${GITLAB_DIR}/.gitlab_shell_secret" << SECEOF
+# ── Gitaly 初始化（无论 schema 是否已存在，都必须生成 config.toml）──
+# 生成 .gitlab_shell_secret（首次运行时缺失）
+if [ ! -f "${GITLAB_DIR}/.gitlab_shell_secret" ]; then
+    cat > "${GITLAB_DIR}/.gitlab_shell_secret" << SECEOF
 default: $(head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)
 gitaly_token: $(head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)
 SECEOF
-                chown git:git "${GITLAB_DIR}/.gitlab_shell_secret"
-                chmod 600 "${GITLAB_DIR}/.gitlab_shell_secret"
-                info "  ✓ .gitlab_shell_secret 已生成"
-            fi
-            _gitaly_token=$(grep -oP 'gitaly_token:\s*\K.*' "${GITLAB_DIR}/.gitlab_shell_secret" 2>/dev/null || head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)
+    chown git:git "${GITLAB_DIR}/.gitlab_shell_secret"
+    chmod 600 "${GITLAB_DIR}/.gitlab_shell_secret"
+    info "  ✓ .gitlab_shell_secret 已生成"
+fi
+_gitaly_token=$(grep -oP 'gitaly_token:\s*\K.*' "${GITLAB_DIR}/.gitlab_shell_secret" 2>/dev/null || head -c 32 /dev/urandom | sha256sum | cut -d' ' -f1)
 
-            mkdir -p /home/git/repositories
-            chown git:git /home/git/repositories
+mkdir -p /home/git/repositories
+chown git:git /home/git/repositories
+mkdir -p "${GITLAB_DIR}/tmp/sockets/private"
+chown -R git:git "${GITLAB_DIR}/tmp"
 
-            # 确保 Gitaly socket 目录存在
-            mkdir -p "${GITLAB_DIR}/tmp/sockets/private"
-            chown -R git:git "${GITLAB_DIR}/tmp"
-
-            # URL-encode GITLAB_DIR for the [gitlab] url
-            _gitlab_url_path=$(echo "${GITLAB_DIR}" | sed 's|/|%2F|g')
-            cat > "${GITALY_DIR}/config.toml" << GITALYCONF
+# 生成 Gitaly config.toml（无条件，每次安装都确保存在）
+if [ ! -f "${GITALY_DIR}/config.toml" ]; then
+    info "  生成 Gitaly config.toml..."
+    _gitlab_url_path=$(echo "${GITLAB_DIR}" | sed 's|/|%2F|g')
+    cat > "${GITALY_DIR}/config.toml" << GITALYCONF
 socket_path = '${GITLAB_DIR}/tmp/sockets/private/gitaly.socket'
 bin_dir = '${GITALY_DIR}/_build/bin'
 
@@ -290,22 +286,28 @@ token = '${_gitaly_token}'
 [logging]
 format = 'json'
 GITALYCONF
-            chown git:git "${GITALY_DIR}/config.toml"
-            chmod 640 "${GITALY_DIR}/config.toml"
-            info "  ✓ config.toml 已生成: ${GITALY_DIR}/config.toml"
+    chown git:git "${GITALY_DIR}/config.toml"
+    chmod 640 "${GITALY_DIR}/config.toml"
+    info "  ✓ config.toml 已生成: ${GITALY_DIR}/config.toml"
+fi
 
-            # 同步 gitlab.yml 的 gitaly_address，确保指向正确的 Gitaly socket
-            if grep -q 'gitaly_address:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
-                sudo -u git -H sed -i "s|gitaly_address:.*|gitaly_address: unix:${GITLAB_DIR}/tmp/sockets/private/gitaly.socket|" "${GITLAB_DIR}/config/gitlab.yml"
-                info "  ✓ gitlab.yml gitaly_address 已同步"
-            fi
+# 同步 gitlab.yml 的 gitaly 配置
+if grep -q 'gitaly_address:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
+    sudo -u git -H sed -i "s|gitaly_address:.*|gitaly_address: unix:${GITLAB_DIR}/tmp/sockets/private/gitaly.socket|" "${GITLAB_DIR}/config/gitlab.yml"
+fi
+if grep -q 'token:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
+    sudo -u git -H sed -i "/^  gitaly:/,/^  [a-z]/{s|^    token:.*|    token: '${_gitaly_token}'|}" "${GITLAB_DIR}/config/gitlab.yml"
+fi
 
-            # 同步 gitlab.yml 的 gitaly.token，确保 HMAC 认证匹配
-            if grep -q 'token:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
-                sudo -u git -H sed -i "/^  gitaly:/,/^  [a-z]/{s|^    token:.*|    token: '${_gitaly_token}'|}" "${GITLAB_DIR}/config/gitlab.yml"
-                info "  ✓ gitlab.yml gitaly.token 已同步"
-            fi
-        fi
+# ── 检查是否已初始化 ──
+SCHEMA_DONE=$(_pg_sql -d gitlabhq_production -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations'" 2>/dev/null || echo "0")
+if [ "${SCHEMA_DONE}" = "1" ]; then
+    ROWS=$(_pg_sql -d gitlabhq_production -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null || echo "0")
+    info "  ✓ schema_migrations 已存在 (${ROWS} migrations)，跳过 rake gitlab:setup"
+else
+    # 先确保 Gitaly 在运行（rake gitlab:setup 需要）
+    if ! systemctl is-active gitlab-gitaly &>/dev/null 2>&1; then
+        info "  先启动 Gitaly（rake gitlab:setup 需要）..."
         # gitlab.target 必须存在，否则 systemctl enable 报依赖错误
         if [ ! -f /etc/systemd/system/gitlab.target ]; then
             cat > /etc/systemd/system/gitlab.target << 'TARGETEOF'
@@ -405,14 +407,60 @@ if [ ! -d "node_modules" ] || [ "$(find node_modules -maxdepth 1 -type d | wc -l
     info "  ✓ Node 依赖安装完成"
 fi
 
-# 前端资源编译
-if [ -d "public/assets" ] && [ "$(ls public/assets/ | wc -l)" -gt 10 ]; then
-    info "  ✓ public/assets 已编译，跳过 assets:compile"
+# 前端资源编译（自适应 Node 堆内存 + 区分 CRLF/OOM 错误）
+# 成功标志：webpack 编译完成会生成 manifest.json，同时写入标记文件
+_WEBPACK_DONE_MARKER="${GITLAB_DIR}/tmp/.webpack_compile_done"
+if [ -f "${_WEBPACK_DONE_MARKER}" ] && [ -f "public/assets/webpack/manifest.json" ]; then
+    info "  ✓ 前端资源已编译，跳过 assets:compile"
 else
-    info "  编译前端资源（此步骤 5-15 分钟）..."
-    sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" NODE_OPTIONS="--max-old-space-size=4096" bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production  \
-        || err "前端资源编译失败（机器内存不足，建议 >= 16GB）"
-    info "  ✓ 前端资源编译完成"
+    # 清除上次不完整的编译残留（没标志 = 没成功过）
+    if [ -d "public/assets" ]; then
+        info "  未检测到编译完成标志，清除上次残留..."
+        rm -rf public/assets
+    fi
+    rm -f "${_WEBPACK_DONE_MARKER}"
+
+    # 根据可用内存自动设定 Node 堆大小
+    # 可通过环境变量手动指定：NODE_HEAP_MB=7168 bash install_gitlab_source.sh
+    if [ -n "${NODE_HEAP_MB:-}" ]; then
+        _NODE_HEAP="${NODE_HEAP_MB}"
+        info "  使用手动指定的 Node 堆: ${_NODE_HEAP}MB"
+    else
+        _MEM_TOTAL_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 8)
+        _SWAP_TOTAL=$(awk '/SwapTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
+        _VIRT_GB=$((_MEM_TOTAL_GB + _SWAP_TOTAL))
+        # 堆 = 虚拟内存 * 60%，min 4096, max 8192
+        _NODE_HEAP=$(( _VIRT_GB * 60 / 100 * 1024 ))
+        [ "${_NODE_HEAP}" -lt 4096 ] && _NODE_HEAP=4096
+        [ "${_NODE_HEAP}" -gt 8192 ] && _NODE_HEAP=8192
+        # 虚拟内存不足 10GB 时警告
+        if [ "${_VIRT_GB}" -lt 10 ]; then
+            warn "  虚拟内存仅 ${_VIRT_GB}GB，webpack 极易 OOM，建议: dd if=/dev/zero of=/swapfile bs=1M count=4096"
+        fi
+    fi
+    info "  编译前端资源（Node 堆: ${_NODE_HEAP}MB, 虚拟内存: ${_VIRT_GB:-?}GB, 约 10-30 分钟）..."
+
+    _WEBPACK_LOG="/tmp/webpack_compile.log"
+    if sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" \
+        NODE_OPTIONS="--max-old-space-size=${_NODE_HEAP}" \
+        bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production 2>&1 | tee "${_WEBPACK_LOG}"; then
+        touch "${_WEBPACK_DONE_MARKER}"
+        info "  ✓ 前端资源编译完成"
+    else
+        _TAIL_LOG=$(tail -30 "${_WEBPACK_LOG}" 2>/dev/null || true)
+        # 区分 CRLF 错误、内存溢出、其他错误
+        if echo "${_TAIL_LOG}" | grep -q "bash.*\r\|Permission denied.*bash"; then
+            warn "  日志: ${_WEBPACK_LOG}"
+            err "前端资源编译失败：检测到 Windows 换行符 (CRLF) 残留"
+        elif echo "${_TAIL_LOG}" | grep -q "heap out of memory\|OOM\|SIGABRT\|CALL_AND_RETRY_LAST"; then
+            warn "  日志: ${_WEBPACK_LOG}"
+            err "前端资源编译失败：Node.js 堆溢出 (heap=${_NODE_HEAP}MB, mem=${_MEM_TOTAL_GB}GB)
+      建议: 增加内存至 12GB+ 或手动添加 swap (dd + mkswap + swapon)"
+        else
+            warn "  日志: ${_WEBPACK_LOG}"; echo "${_TAIL_LOG}"
+            err "前端资源编译失败，详见 ${_WEBPACK_LOG}"
+        fi
+    fi
 fi
 
 # 编译完成后恢复之前暂停的服务

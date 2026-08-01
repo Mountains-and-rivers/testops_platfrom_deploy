@@ -1,0 +1,21 @@
+# ============================================================
+# MeterSphere — 预编译 Dockerfile（裸机构建 JAR 后快速打包）
+# 前提: 已执行 bash build_metersphere.sh（产出 /opt/metersphere/*.jar）
+# ============================================================
+FROM quay.io/centos/centos:stream9
+
+COPY /opt/jdk17 /opt/jdk17
+ENV JAVA_HOME=/opt/jdk17 PATH=/opt/jdk17/bin:${PATH}
+
+RUN groupadd -r metersphere && useradd -r -g metersphere -s /bin/false metersphere && \
+    mkdir -p /data/metersphere /var/log/metersphere
+
+COPY /opt/metersphere/*.jar /opt/metersphere/
+RUN chown -R metersphere:metersphere /opt/metersphere /data/metersphere /var/log/metersphere
+
+COPY build/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 8081
+USER metersphere
+ENTRYPOINT ["docker-entrypoint.sh"]

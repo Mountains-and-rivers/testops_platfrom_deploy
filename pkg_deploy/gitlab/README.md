@@ -278,15 +278,48 @@ bash build/clean_gitlab.sh source --data
 | 资源 | Omnibus | Docker | 源码构建 |
 |------|---------|--------|---------|
 | CPU | 2 Cores | 2 Cores | 4+ Cores |
-| 内存 | 4 GB | 4 GB | **16 GB（强烈建议）** |
+| 内存 | 4 GB | 4 GB | **8 GB（最低）/ 16 GB（建议）** |
 | 磁盘 | 20 GB | 20 GB | 50+ GB
 
-> ⚠️ **内存警告**  
-> GitLab 官方要求源码安装最低 **8 GB RAM**，但实际编译前端资源（webpack）时  
-> package.json 中硬编码了 `NODE_OPTIONS="--max-old-space-size=10240"`（10 GB 堆），  
-> 加上 PostgreSQL / Redis / Gitaly / Puma 等运行时服务，**8 GB 极易 OOM**。  
+> ⚠️ **内存说明（重要）**  
+> GitLab 官方要求源码安装最低 **8 GB RAM**。前端资源编译（webpack）是内存峰值最高的阶段，  
+> package.json 中默认 `NODE_OPTIONS="--max-old-space-size=10240"`（10 GB 堆）。  
 >   
-> **实测结论：** 7.3 GB 机器即使关掉全部服务也编译失败；**16 GB** 可正常完成。  
->   
-> 如果内存不足，唯一正规缓解办法：**编译前关掉所有 GitLab 服务释放内存，编译完再启动**。  
-> 安装脚本已自动处理（Step 3 编译前自动 stop Puma/Sidekiq，编译后 restart）。
+> **安装脚本已自动处理：**  
+> - 编译前自动 stop Puma / Sidekiq / Workhorse 释放内存  
+> - **自适应 Node 堆**：按公式 `(物理内存 + Swap) × 60%` 自动计算，min 4096 / max 8192  
+> - 支持手动覆盖：`NODE_HEAP_MB=7168 bash install_gitlab_source.sh`  
+>
+> **计算公式：`_NODE_HEAP = (RAM(GB) + Swap(GB)) × 60% × 1024` MB**
+>
+> | 机器配置 | 虚拟内存 | Node 堆 | 能否编译 |
+> |----------|---------|---------|---------|
+> | 16 GB + 0 swap | 16 GB | 8192 MB | ✅ 富余 |
+> | 12 GB + 0 swap | 12 GB | 7372 MB | ✅ 正常 |
+> | 8 GB + 4 GB swap | 12 GB | 7372 MB | ✅ swap 起关键作用 |
+> | 9 GB + 4 GB swap | 13 GB | 7987 MB | ✅ 实测通过 |
+> | 9 GB + 2 GB swap | 11 GB | 6758 MB | ⚠️ 可能 OOM |
+> | 9 GB + 0 swap | 9 GB | 4096 MB | ❌ 必 OOM |
+> | < 8 GB + 0 swap | < 8 GB | 4096 MB | ❌ 不建议尝试 |
+>
+> **核心结论：Swap 是关键杠杆，不是辅助。**  
+> webpack 编译需要 ~7 GB 真实堆内存，9 GB 物理机必须加 4 GB swap 才能达标。  
+> 虚拟内存 < 10 GB 时脚本会自动打印警告。
+>
+> **Swap 操作（必须执行）：**  
+> ```bash
+> # 4 GB swap（推荐，9 GB 机器上编译必需）
+> dd if=/dev/zero of=/swapfile bs=1M count=4096
+> chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+> echo '/swapfile none swap defaults 0 0' >> /etc/fstab  # 持久化
+> ```
+>
+> **编译失败诊断：**  
+> 脚本会自动区分三类错误，输出不同提示：
+> - **CRLF 残留** → 自动清理后重试
+> - **Node 堆溢出** (`SIGABRT`) → 增加 swap 或手动指定 `NODE_HEAP_MB`
+> - **系统 OOM Kill** (`SIGKILL`) → 虚拟内存不足，必须增加 swap
+>
+> **已知问题：CRLF 换行符**  
+> 源码包在 Windows 解压后可能残留 `\r` 换行符，导致 `Permission denied`。  
+> 安装脚本启动时自动检测并清理 `scripts/` `bin/` `config/` 目录下的 CRLF 文件。

@@ -143,15 +143,22 @@ testops_platform_deploy/
 | GitLab 代码仓库 | `pkg_deploy/gitlab/` | ✅ 已实现 | P1 | GitLab CE 19.3（Omnibus / Docker / 源码构建） |
 | 禅道应用部署 | `pkg_deploy/zentao/` | ✅ 已实现 | P1 | 禅道（PHP 源码编译 + Docker + K8s） |
 | Java 应用 CI/CD | `pkg_deploy/java_app_cicd/` | ✅ 已实现 | P1 | Java 应用 Jenkins Pipeline + K8s 部署 |
-| Nginx | `pkg_deploy/nginx/` | ✅ 已实现 | P1 | Nginx 1.26.2（二进制 RPM） |
-| PostgreSQL 17 | `pkg_deploy/postgresql17/` | ✅ 已实现 | P1 | PostgreSQL 17.4（二进制 RPM） |
-| Redis 7 | `pkg_deploy/redis7/` | ✅ 已实现 | P1 | Redis 7.4.1（二进制 RPM，Remi） |
+| Nginx | `pkg_deploy/nginx/` | ✅ 已实现 | P1 | Nginx 1.26.2（二进制 RPM / 源码编译预留） |
+| PostgreSQL 18 | `pkg_deploy/postgresql18/` | ✅ 已实现 | P1 | PostgreSQL 18.4（二进制 RPM） |
+| Redis 7 | `pkg_deploy/redis7/` | ✅ 已实现 | P1 | Redis 7.4.1（二进制 RPM） |
 | MySQL 8.0 | `pkg_deploy/mysql8.0/` | ✅ 已实现 | P1 | MySQL 8.0.35（二进制 tar.xz） |
 | 禅道 CLI | `pkg_deploy/zentao_cli/` | ✅ 已实现 | P2 | 禅道部署 CLI（Python） |
-| Prometheus 监控栈 | `pkg_deploy/prometheus_stack/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager |
-| MeterSphere | `pkg_deploy/metersphere/` | 🔲 规划中 | P1 | MeterSphere 测试平台 |
-| Wiki.js | `pkg_deploy/wikijs/` | 🔲 规划中 | P2 | Wiki.js 文档平台 |
+| Wiki.js | `pkg_deploy/wikijs/` | ⚠️ 脚本已生成，待测试 | P2 | Wiki.js 2.x（源码构建 + Docker） |
+| MeterSphere | `pkg_deploy/metersphere/` | ⚠️ 脚本已生成，待测试 | P1 | MeterSphere 3.x（Maven 源码 + Docker） |
+| ELK / ELFK | `pkg_deploy/elk/` | ⚠️ 脚本已生成，待测试 | P1 | Elasticsearch + Logstash + Kibana + Filebeat |
+| Loki 日志方案 | `pkg_deploy/loki/` | ⚠️ 脚本已生成，待测试 | P1 | Loki + Promtail 轻量日志聚合 |
+| Prometheus 监控栈 | `pkg_deploy/prometheus_stack/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager + Node Exporter |
+| MaxKey IAM | `pkg_deploy/maxkey/` | 🔲 规划中 | P2 | MaxKey 统一认证平台 |
+| Dashboard | `pkg_deploy/dashboard/` | 🔲 规划中 | P2 | 监控面板 / 可视化看板 |
 | AI 测试工具集 | `pkg_deploy/ai_test_suite/` | 🔲 规划中 | P3 | AI 辅助测试工具 |
+
+> **状态说明：** ✅ 已实现（经测试） | ⚠️ 脚本已生成，待测试 | 🔲 规划中
+> 未标注"✅"的组件**不可用于生产环境**。
 
 ## 部署顺序
 
