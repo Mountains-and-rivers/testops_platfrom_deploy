@@ -433,9 +433,39 @@ else
         _NODE_HEAP=$(( _VIRT_GB * 60 / 100 * 1024 ))
         [ "${_NODE_HEAP}" -lt 4096 ] && _NODE_HEAP=4096
         [ "${_NODE_HEAP}" -gt 8192 ] && _NODE_HEAP=8192
-        # 虚拟内存不足 10GB 时警告
+        # 虚拟内存不足 10GB 时自动创建 swap
         if [ "${_VIRT_GB}" -lt 10 ]; then
-            warn "  虚拟内存仅 ${_VIRT_GB}GB，webpack 极易 OOM，建议: dd if=/dev/zero of=/swapfile bs=1M count=4096"
+            _SWAP_NEEDED=$(( (12 - _VIRT_GB) * 1024 ))
+            _SWAP_FILE="/swapfile"
+            warn "  虚拟内存仅 ${_VIRT_GB}GB，webpack 极易 OOM，自动创建 ${_SWAP_NEEDED}MB swap..."
+
+            # 如果 swap 已激活就直接用
+            if swapon --show 2>/dev/null | grep -q "${_SWAP_FILE}"; then
+                info "  ✓ swap 已激活，跳过创建"
+            else
+                # 文件存在但未激活 → 可能是上次残留的无效文件，删除重建
+                if [ -f "${_SWAP_FILE}" ]; then
+                    warn "  ${_SWAP_FILE} 存在但未激活，重建..."
+                    swapoff "${_SWAP_FILE}" 2>/dev/null || true
+                    rm -f "${_SWAP_FILE}"
+                fi
+                # 创建并激活 swap
+                dd if=/dev/zero of="${_SWAP_FILE}" bs=1M count="${_SWAP_NEEDED}" 2>/dev/null || true
+                chmod 600 "${_SWAP_FILE}"
+                mkswap "${_SWAP_FILE}" 2>/dev/null && swapon "${_SWAP_FILE}" 2>/dev/null || true
+            fi
+
+            if swapon --show 2>/dev/null | grep -q "${_SWAP_FILE}"; then
+                _SWAP_TOTAL_NEW=$(awk '/SwapTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
+                _VIRT_GB=$((_MEM_TOTAL_GB + _SWAP_TOTAL_NEW))
+                _NODE_HEAP=$(( _VIRT_GB * 60 / 100 * 1024 ))
+                [ "${_NODE_HEAP}" -lt 4096 ] && _NODE_HEAP=4096
+                [ "${_NODE_HEAP}" -gt 8192 ] && _NODE_HEAP=8192
+                info "  ✓ swap 已启用，虚拟内存: ${_VIRT_GB}GB, Node 堆: ${_NODE_HEAP}MB"
+                grep -q "${_SWAP_FILE}" /etc/fstab 2>/dev/null || echo "${_SWAP_FILE} none swap sw 0 0" >> /etc/fstab
+            else
+                warn "  ✗ swap 创建失败，继续尝试编译（可能 OOM）"
+            fi
         fi
     fi
     info "  编译前端资源（Node 堆: ${_NODE_HEAP}MB, 虚拟内存: ${_VIRT_GB:-?}GB, 约 10-30 分钟）..."
@@ -452,12 +482,12 @@ else
         if echo "${_TAIL_LOG}" | grep -q "bash.*\r\|Permission denied.*bash"; then
             warn "  日志: ${_WEBPACK_LOG}"
             err "前端资源编译失败：检测到 Windows 换行符 (CRLF) 残留"
-        elif echo "${_TAIL_LOG}" | grep -q "heap out of memory\|OOM\|SIGABRT\|CALL_AND_RETRY_LAST"; then
+        elif echo "${_TAIL_LOG}" | grep -q "SIGKILL\|heap out of memory\|OOM\|SIGABRT\|CALL_AND_RETRY_LAST"; then
             warn "  日志: ${_WEBPACK_LOG}"
             err "前端资源编译失败：Node.js 堆溢出 (heap=${_NODE_HEAP}MB, mem=${_MEM_TOTAL_GB}GB)
       建议: 增加内存至 12GB+ 或手动添加 swap (dd + mkswap + swapon)"
         else
-            warn "  日志: ${_WEBPACK_LOG}"; echo "${_TAIL_LOG}"
+            warn "  日志: ${_WEBPACK_LOG}"
             err "前端资源编译失败，详见 ${_WEBPACK_LOG}"
         fi
     fi
