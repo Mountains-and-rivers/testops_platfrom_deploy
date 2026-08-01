@@ -49,7 +49,7 @@ _PG_REMOVE_LIST=(
     postgresql16-devel postgresql16-server postgresql16 postgresql16-libs postgresql16-contrib
 )
 for pkg in "${_PG_REMOVE_LIST[@]}"; do
-    if rpm -q "${pkg}" &>/dev/null 2>&1; then
+    if rpm -q "${pkg}" &>/dev/null; then
         if rpm -e --nodeps "${pkg}" 2>&1; then
             info "  ${pkg} 已移除"
         else

@@ -68,7 +68,7 @@ echo "============================================"; echo ""
 # ── 1. 预检 ─────────────────────────────────────────────
 step "[1/8] 环境检查..."
 
-if systemctl is-active jenkins &>/dev/null 2>&1 && ! ${FORCE}; then
+if systemctl is-active jenkins &>/dev/null && ! ${FORCE}; then
     info "Jenkins 已运行，跳过安装"; systemctl status jenkins --no-pager -l 2>/dev/null | head -8 || true
     echo ""; info "重装: bash install_jenkins.sh --force"; exit 0
 fi
@@ -96,7 +96,7 @@ ss -tlnp 2>/dev/null | grep -q ":${JENKINS_PORT} " && warn "端口 ${JENKINS_POR
 # ── 2. 用户与目录 ──────────────────────────────────────
 step "[2/8] 用户与目录..."
 
-id "${JENKINS_USER}" &>/dev/null 2>&1 || {
+id "${JENKINS_USER}" &>/dev/null || {
     groupadd -f "${JENKINS_USER}"
     useradd -r -g "${JENKINS_USER}" -d "${JENKINS_HOME}" -s /bin/bash -c "Jenkins" "${JENKINS_USER}"
     ok "用户 ${JENKINS_USER} 已创建"
@@ -271,7 +271,7 @@ ok "systemd 服务已配置"
 
 # ── 6. 防火墙 ──────────────────────────────────────────
 step "[6/8] 防火墙..."
-if ! ${SKIP_FW} && command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null 2>&1; then
+if ! ${SKIP_FW} && command -v firewall-cmd &>/dev/null && systemctl is-active firewalld &>/dev/null; then
     firewall-cmd --add-port="${JENKINS_PORT}"/tcp --permanent 2>/dev/null && ok "端口 ${JENKINS_PORT}/tcp"
     firewall-cmd --add-port="${AGENT_PORT}"/tcp --permanent 2>/dev/null && ok "Agent ${AGENT_PORT}/tcp"
     firewall-cmd --reload 2>/dev/null || true
@@ -286,7 +286,7 @@ pkill -f "jenkins.war" 2>/dev/null || true; sleep 1
 systemctl start jenkins
 
 for i in $(seq 1 30); do
-    systemctl is-active jenkins &>/dev/null 2>&1 && { ok "systemd: active (${i}/30)"; break; }
+    systemctl is-active jenkins &>/dev/null && { ok "systemd: active (${i}/30)"; break; }
     [ $i -eq 30 ] && { journalctl -u jenkins --no-pager -n 30 2>/dev/null || true; die "启动失败"; }
     sleep 2
 done

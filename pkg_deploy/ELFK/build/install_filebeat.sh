@@ -91,7 +91,8 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=${FB_HOME}/filebeat -e -c ${FB_HOME}/filebeat.yml
-Restart=on-failure; RestartSec=15
+Restart=on-failure
+RestartSec=15
 [Install]
 WantedBy=multi-user.target
 EOF

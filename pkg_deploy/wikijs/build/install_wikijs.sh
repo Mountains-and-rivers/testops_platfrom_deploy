@@ -55,7 +55,7 @@ step "[0/5] 检查..."
 
 [ -f "${WIKI_DIR}/package.json" ] || err "Wiki.js 未构建: ${WIKI_DIR}/package.json 不存在，请先执行 build_wikijs.sh"
 
-if ! ${FORCE} && systemctl is-active wiki &>/dev/null 2>&1; then
+if ! ${FORCE} && systemctl is-active wiki &>/dev/null; then
     info "  wiki 服务已运行，跳过安装（--force 强制重装）"; exit 0
 fi
 

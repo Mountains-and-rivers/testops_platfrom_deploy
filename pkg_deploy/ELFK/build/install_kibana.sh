@@ -68,7 +68,8 @@ After=network.target elasticsearch.service
 Type=simple
 User=${KB_USER}; Group=${KB_USER}
 ExecStart=${KB_HOME}/bin/kibana
-Restart=on-failure; RestartSec=30
+Restart=on-failure
+RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF

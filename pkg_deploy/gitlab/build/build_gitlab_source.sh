@@ -548,7 +548,7 @@ _WORKHORSE_DST="${GITLAB_HOME}/gitlab-workhorse"
 # ── Gitaly ──
 _GITALY_BIN="${_GITALY_DST}/_build/bin/gitaly"  # meson 构建输出路径
 
-if [ -f "${_GITALY_BIN}" ] && "${_GITALY_BIN}" --version &>/dev/null 2>&1; then
+if [ -f "${_GITALY_BIN}" ] && "${_GITALY_BIN}" --version &>/dev/null; then
     info "  ✓ Gitaly 已编译"
 else
     if load_source_tar "gitaly" "${_GITALY_DST}"; then
@@ -583,7 +583,7 @@ else
 fi
 
 # ── GitLab Workhorse ──
-if [ -f "${_WORKHORSE_DST}/gitlab-workhorse" ] && "${_WORKHORSE_DST}/gitlab-workhorse" -version &>/dev/null 2>&1; then
+if [ -f "${_WORKHORSE_DST}/gitlab-workhorse" ] && "${_WORKHORSE_DST}/gitlab-workhorse" -version &>/dev/null; then
     info "  ✓ gitlab-workhorse 已编译"
 else
     if load_source_tar "gitlab-workhorse" "${_WORKHORSE_DST}"; then

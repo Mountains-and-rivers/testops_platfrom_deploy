@@ -113,9 +113,9 @@ export PATH="/usr/pgsql-18/bin:/usr/pgsql-17/bin:/usr/pgsql-16/bin:/usr/local/ru
 
 if ${REMOTE}; then
     # 远程模式：TCP 连接检测
-    if PGPASSWORD="${PG_PASSWORD}" psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -tAc 'SELECT 1' &>/dev/null 2>&1; then
+    if PGPASSWORD="${PG_PASSWORD}" psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -tAc 'SELECT 1' &>/dev/null; then
         info "  ✓ PostgreSQL 远程连接正常 (${PG_HOST}:${PG_PORT})"
-    elif command -v pg_isready &>/dev/null && pg_isready -h "${PG_HOST}" -p "${PG_PORT}" &>/dev/null 2>&1; then
+    elif command -v pg_isready &>/dev/null && pg_isready -h "${PG_HOST}" -p "${PG_PORT}" &>/dev/null; then
         info "  ✓ PostgreSQL 远程可达 (${PG_HOST}:${PG_PORT})"
     else
         warn "  ✗ PostgreSQL 远程不可达 (${PG_HOST}:${PG_PORT})"; FAILED=1
@@ -123,7 +123,7 @@ if ${REMOTE}; then
 else
     if systemctl is-active postgresql &>/dev/null; then
         info "  ✓ PostgreSQL 运行中"
-    elif pg_isready &>/dev/null 2>&1; then
+    elif pg_isready &>/dev/null; then
         info "  ✓ PostgreSQL 运行中"
     else
         warn "  ✗ PostgreSQL 未运行，请先: systemctl start postgresql"; FAILED=1
@@ -306,7 +306,7 @@ if [ "${SCHEMA_DONE}" = "1" ]; then
     info "  ✓ schema_migrations 已存在 (${ROWS} migrations)，跳过 rake gitlab:setup"
 else
     # 先确保 Gitaly 在运行（rake gitlab:setup 需要）
-    if ! systemctl is-active gitlab-gitaly &>/dev/null 2>&1; then
+    if ! systemctl is-active gitlab-gitaly &>/dev/null; then
         info "  先启动 Gitaly（rake gitlab:setup 需要）..."
         # gitlab.target 必须存在，否则 systemctl enable 报依赖错误
         if [ ! -f /etc/systemd/system/gitlab.target ]; then
@@ -325,7 +325,7 @@ TARGETEOF
             systemctl is-active gitlab-gitaly &>/dev/null && info "  ✓ Gitaly 已启动" || warn "Gitaly systemd 启动失败，尝试手动启动..."
         fi
         # 兜底：systemd 启动失败则手动后台运行
-        if ! systemctl is-active gitlab-gitaly &>/dev/null 2>&1; then
+        if ! systemctl is-active gitlab-gitaly &>/dev/null; then
             sudo -u git -H bash -c "cd ${GITALY_DIR} && ./_build/bin/gitaly serve ${GITALY_DIR}/config.toml &>/tmp/gitaly.log &"
             sleep 3
             info "  Gitaly 手动后台启动"
@@ -675,7 +675,7 @@ step "[7/7] 验证..."
 echo ""
 echo "--- 服务状态 ---"
 for svc in gitlab-gitaly gitlab-workhorse gitlab-puma gitlab-sidekiq; do
-    if systemctl is-active "${svc}" &>/dev/null 2>&1; then
+    if systemctl is-active "${svc}" &>/dev/null; then
         echo "  ✓ ${svc}: active"
     else
         echo "  ✗ ${svc}: inactive"

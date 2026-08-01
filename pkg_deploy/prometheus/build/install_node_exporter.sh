@@ -54,9 +54,12 @@ cat > /etc/systemd/system/node_exporter.service << EOF
 Description=Node Exporter ${NE_VERSION}
 After=network.target
 [Service]
-Type=simple; User=${NE_USER}; Group=${NE_USER}
+Type=simple
+User=${NE_USER}
+Group=${NE_USER}
 ExecStart=${NE_HOME}/node_exporter --web.listen-address=:${NE_PORT}
-Restart=on-failure; RestartSec=10
+Restart=on-failure
+RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF

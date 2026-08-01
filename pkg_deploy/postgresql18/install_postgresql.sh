@@ -66,7 +66,7 @@ echo "============================================"
 # ═══ 0. 已安装检测 ═══
 step "[0/6] 检查已安装..."
 # 只有在二进制存在、数据目录有效、服务能启动时才跳过
-if [ -f "${INSTALL_DIR}/bin/postgres" ] && ${INSTALL_DIR}/bin/postgres --version &>/dev/null 2>&1 \
+if [ -f "${INSTALL_DIR}/bin/postgres" ] && ${INSTALL_DIR}/bin/postgres --version &>/dev/null \
     && [ -f "${DATA_DIR}/PG_VERSION" ]; then
     ver=$(${INSTALL_DIR}/bin/postgres --version 2>&1 | awk '{print $3}')
     info "  已安装 PostgreSQL ${ver}"
@@ -85,7 +85,7 @@ step "[1/6] 安装 RPM..."
 # 检测 stale RPM 状态：RPM 数据库认为已安装但文件缺失
 # （可能因卸载脚本 kill 后残留造成）
 for _pkg in postgresql${PG_MAJOR} postgresql${PG_MAJOR}-libs postgresql${PG_MAJOR}-server; do
-    if rpm -q "${_pkg}" &>/dev/null 2>&1 && [ ! -f "${INSTALL_DIR}/bin/postgres" ]; then
+    if rpm -q "${_pkg}" &>/dev/null && [ ! -f "${INSTALL_DIR}/bin/postgres" ]; then
         warn "  检测到 ${_pkg} RPM 残留（文件缺失），强制清理..."
         rpm -e --nodeps postgresql${PG_MAJOR}-server postgresql${PG_MAJOR} postgresql${PG_MAJOR}-libs 2>/dev/null || true
         break

@@ -231,7 +231,7 @@ ok "已清理临时文件"
 # 修复权限（如果不是 root 运行的）
 if [ "$(id -u)" -eq 0 ]; then
     JENKINS_USER="${JENKINS_USER:-jenkins}"
-    if id "${JENKINS_USER}" &>/dev/null 2>&1; then
+    if id "${JENKINS_USER}" &>/dev/null; then
         chown -R "${JENKINS_USER}:${JENKINS_USER}" "${JENKINS_PLUGIN_DIR}" 2>/dev/null && \
             ok "权限: ${JENKINS_USER}" || true
     fi

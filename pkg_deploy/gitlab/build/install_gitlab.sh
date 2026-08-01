@@ -53,7 +53,7 @@ MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
 
 case "${MODE}" in
     omnibus)
-        if gitlab-ctl status &>/dev/null 2>&1; then
+        if gitlab-ctl status &>/dev/null; then
             ${FORCE} || { info "GitLab 已运行"; exit 0; }
             warn "--force: 覆盖已有安装"
             gitlab-ctl stop 2>/dev/null || true

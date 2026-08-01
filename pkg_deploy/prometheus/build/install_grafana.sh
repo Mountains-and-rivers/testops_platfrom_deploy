@@ -86,7 +86,7 @@ datasources:
 EOF
 
 # Loki 数据源（如果 Loki 已安装）
-if curl -sk --connect-timeout 2 "${LOKI_URL}/ready" &>/dev/null 2>&1; then
+if curl -sk --connect-timeout 2 "${LOKI_URL}/ready" &>/dev/null; then
     cat > "${DATA_DIR}/provisioning/datasources/loki.yaml" << EOF
 apiVersion: 1
 datasources:
@@ -125,10 +125,13 @@ cat > /etc/systemd/system/grafana.service << EOF
 Description=Grafana ${GF_VERSION} - Analytics & Monitoring
 After=network.target
 [Service]
-Type=simple; User=${GF_USER}; Group=${GF_USER}
+Type=simple
+User=${GF_USER}
+Group=${GF_USER}
 ExecStart=${GF_HOME}/bin/grafana server --config=${GF_HOME}/conf/custom.ini \\
     --homepath=${GF_HOME}
-Restart=on-failure; RestartSec=10
+Restart=on-failure
+RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF

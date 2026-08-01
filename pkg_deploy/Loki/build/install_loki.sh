@@ -89,9 +89,12 @@ cat > /etc/systemd/system/loki.service << EOF
 Description=Loki ${LOKI_VERSION} - Log Aggregation
 After=network.target
 [Service]
-Type=simple; User=${LOKI_USER}; Group=${LOKI_USER}
+Type=simple
+User=${LOKI_USER}
+Group=${LOKI_USER}
 ExecStart=${LOKI_HOME}/loki-linux-amd64 -config.file=${LOKI_HOME}/config.yaml
-Restart=on-failure; RestartSec=10
+Restart=on-failure
+RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF

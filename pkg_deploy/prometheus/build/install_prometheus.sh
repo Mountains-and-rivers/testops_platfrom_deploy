@@ -86,11 +86,14 @@ cat > /etc/systemd/system/prometheus.service << EOF
 Description=Prometheus ${PROM_VERSION} - Monitoring System
 After=network.target
 [Service]
-Type=simple; User=${PROM_USER}; Group=${PROM_USER}
+Type=simple
+User=${PROM_USER}
+Group=${PROM_USER}
 ExecStart=${PROM_HOME}/prometheus --config.file=${PROM_HOME}/prometheus.yml \\
     --storage.tsdb.path=${DATA_DIR} --storage.tsdb.retention.time=${RETENTION} \\
     --web.listen-address=:${PROM_PORT}
-Restart=on-failure; RestartSec=10
+Restart=on-failure
+RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF

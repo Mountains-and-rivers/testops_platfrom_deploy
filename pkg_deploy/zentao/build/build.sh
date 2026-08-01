@@ -155,13 +155,13 @@ pre_check() {
     # 9. Docker 运行状态
     total=$((total+1))
     info "  检查 Docker 运行状态..."
-    if timeout 10 docker info &>/dev/null 2>&1; then
+    if timeout 10 docker info &>/dev/null; then
         check_ok "Docker 运行中"
         passed=$((passed+1))
     else
         systemctl start docker 2>/dev/null || true
         sleep 2
-        if timeout 10 docker info &>/dev/null 2>&1; then
+        if timeout 10 docker info &>/dev/null; then
             check_ok "Docker 已启动"
             passed=$((passed+1))
         else

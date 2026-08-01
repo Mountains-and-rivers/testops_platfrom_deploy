@@ -69,7 +69,7 @@ if [ -f "${INSTALL_DIR}/sbin/nginx" ]; then
 fi
 
 # 也检测 RPM 方式安装的 nginx
-if rpm -q nginx &>/dev/null 2>&1; then
+if rpm -q nginx &>/dev/null; then
     RPM_VER=$(rpm -q --qf "%{VERSION}" nginx 2>/dev/null || echo "?")
     info "  已安装 Nginx ${RPM_VER}（RPM 方式，非本脚本安装，共存在所难免）"
 fi

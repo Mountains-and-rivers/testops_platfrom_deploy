@@ -94,7 +94,8 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=${PT_HOME}/promtail-linux-amd64 -config.file=${PT_HOME}/config.yaml
-Restart=on-failure; RestartSec=15
+Restart=on-failure
+RestartSec=15
 [Install]
 WantedBy=multi-user.target
 EOF

@@ -61,7 +61,7 @@ echo "============================================"
 # ═══ 0. 检查 ═══
 step "[0/5] 检查..."
 
-if ! ${FORCE} && systemctl is-active metersphere &>/dev/null 2>&1; then
+if ! ${FORCE} && systemctl is-active metersphere &>/dev/null; then
     info "  metersphere 已运行，跳过安装（--force 强制重装）"; exit 0
 fi
 

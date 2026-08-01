@@ -81,7 +81,7 @@ if [ -n "${_REDIS_BIN}" ] && [ -x "${_REDIS_BIN}" ]; then
         systemctl stop redis redis-sentinel 2>/dev/null || true
         pkill -9 redis-server 2>/dev/null || true; sleep 1
     fi
-elif rpm -q redis &>/dev/null 2>&1; then
+elif rpm -q redis &>/dev/null; then
     RPM_VER=$(rpm -q --qf "%{VERSION}" redis 2>/dev/null || echo "?")
     _rpm_major=$(echo "${RPM_VER}" | cut -d. -f1)
     _target_major=$(echo "${REDIS_VERSION}" | cut -d. -f1)

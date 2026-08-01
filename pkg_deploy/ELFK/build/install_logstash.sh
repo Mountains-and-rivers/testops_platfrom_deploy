@@ -72,7 +72,8 @@ Type=simple
 User=${LS_USER}
 Group=${LS_USER}
 ExecStart=${LS_HOME}/bin/logstash -f ${LS_HOME}/config/logstash.conf
-Restart=on-failure; RestartSec=30
+Restart=on-failure
+RestartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF

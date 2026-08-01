@@ -83,7 +83,7 @@ echo ""
 # ── 1. Docker 检测 ─────────────────────────────────────
 step "[1/6] Docker 环境..."
 command -v docker &>/dev/null || die "Docker 未安装"
-docker info &>/dev/null 2>&1 || { systemctl start docker 2>/dev/null || true; sleep 2; docker info &>/dev/null 2>&1 || die "Docker 未运行"; }
+docker info &>/dev/null || { systemctl start docker 2>/dev/null || true; sleep 2; docker info &>/dev/null || die "Docker 未运行"; }
 ok "Docker: $(docker --version)"
 
 # ── 2. 基础镜像 ────────────────────────────────────────

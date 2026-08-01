@@ -150,7 +150,7 @@ testops_platform_deploy/
 | 禅道 CLI | `pkg_deploy/zentao_cli/` | ✅ 已实现 | P2 | 禅道部署 CLI（Python） |
 | Wiki.js | `pkg_deploy/wikijs/` | ⚠️ 脚本已生成，待测试 | P2 | Wiki.js 2.x（源码构建 + Docker） |
 | MeterSphere | `pkg_deploy/metersphere/` | ⚠️ 脚本已生成，待测试 | P1 | MeterSphere 3.x（Maven 源码 + Docker） |
-| ELK / ELFK | `pkg_deploy/elk/` | ⚠️ 脚本已生成，待测试 | P1 | Elasticsearch + Logstash + Kibana + Filebeat |
+| ELFK 日志栈 | `pkg_deploy/ELFK/` | ⚠️ 脚本已生成，待测试 | P1 | Elasticsearch + Logstash + Kibana + Filebeat |
 | Loki 日志方案 | `pkg_deploy/loki/` | ⚠️ 脚本已生成，待测试 | P1 | Loki + Promtail 轻量日志聚合 |
 | Prometheus 监控栈 | `pkg_deploy/prometheus/` | 🔲 规划中 | P1 | Prometheus + Grafana + Alertmanager + Node Exporter |
 | MaxKey IAM | `pkg_deploy/maxkey/` | 🔲 规划中 | P2 | MaxKey 统一认证平台 |
