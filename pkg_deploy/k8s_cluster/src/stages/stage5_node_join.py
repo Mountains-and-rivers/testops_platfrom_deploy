@@ -116,10 +116,13 @@ def _join_single_worker(worker: dict, state: WorkflowStateManager) -> None:
                     )
                     if ec == 0:
                         if candidate != img:
-                            ssh.exec_command(
-                                f"ctr -n k8s.io image tag {candidate} {img} && "
-                                f"ctr -n k8s.io image remove {candidate}", timeout=10
+                            tag_ec, _, tag_err = ssh.exec_command(
+                                f"ctr -n k8s.io image tag {candidate} {img} 2>&1 && "
+                                f"ctr -n k8s.io image remove {candidate} 2>&1", timeout=10
                             )
+                            if tag_ec != 0:
+                                logger.warning(f"[{hostname}]   tag 失败 {candidate} -> {img}: {tag_err.strip()[-100:]}")
+                                continue  # try next candidate
                         logger.info(f"[{hostname}]   [OK] {img_short} 远程拉取完成")
                         pulled = True
                         break
