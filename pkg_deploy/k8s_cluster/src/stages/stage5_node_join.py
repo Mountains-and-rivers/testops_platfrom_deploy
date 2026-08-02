@@ -49,52 +49,86 @@ def _join_single_worker(worker: dict, state: WorkflowStateManager) -> None:
         ssh.connect()
         logger.info(f"[{hostname}] 开始加入集群...")
 
-        # 预拉 Worker 必需镜像（pause + kube-proxy + coredns 从阿里云）
+        # 预拉 Worker 必需镜像（优先本地 tar → 阿里云镜像源）
         logger.info(f"[{hostname}] 预拉 Worker 镜像...")
         # 获取 containerd sandbox 版本
         _, pause_ver, _ = ssh.exec_command(
             "grep sandbox_image /etc/containerd/config.toml 2>/dev/null | "
-            "grep -oP 'pause:\\K[^\"]+' || echo '3.10.2'",
+            "grep -oP 'pause:\\K[^\"]+' || echo '3.10'",
             timeout=5
         )
-        pv = pause_ver.strip() or "3.10.2"
-        kv = state.get_global("k8s_version", "1.36.3")
-        # Worker 需要的所有 kube-system 镜像
+        pv = pause_ver.strip() or "3.10"
+        kv = state.get_global("k8s_version")
+        if not kv:
+            _ver_cfg = YAMLHelper.load(os.path.join(CONFIG_DIR, "software_version.yaml"))
+            kv = _ver_cfg.get("software_version", {}).get("kubernetes", {}).get("default", "1.32.13")
+        # Worker 需要的所有 kube-system 镜像（coredns 版本与 kubeadm 1.32 内置一致）
         pre_pull_images = [
             f"registry.k8s.io/pause:{pv}",              # sandbox
             f"registry.k8s.io/kube-proxy:v{kv}",        # kube-proxy daemonset
-            f"registry.k8s.io/coredns/coredns:v1.14.2",  # coredns deployment
+            f"registry.k8s.io/coredns/coredns:v1.11.3",  # coredns deployment
         ]
+        # 镜像加速源（兜底）
         MIRROR = "registry.cn-hangzhou.aliyuncs.com/google_containers"
+        # 本地 images/ 目录
+        local_images_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "images"
+        )
         for img in pre_pull_images:
-            # 检查是否已存在
+            img_short = img.split("/")[-1]  # e.g. pause:3.10, kube-proxy:v1.32.13
+            tar_name = img_short.replace(":", "_") + ".tar"
+            # 检查 containerd 是否已有
             _, check, _ = ssh.exec_command(
-                f"ctr -n k8s.io image ls -q | grep -cF '{img}' || echo 0", timeout=5
+                f"ctr -n k8s.io image ls -q 2>/dev/null | grep -qF '{img}' && echo YES || echo NO",
+                timeout=5
             )
-            if check.strip() != "0":
-                logger.info(f"[{hostname}]   ✓ {img.split('/')[-1]} 已存在")
+            if check.strip() == "YES":
+                logger.info(f"[{hostname}]   [OK] {img_short} 已存在")
                 continue
 
-            # 构造镜像源候选
-            flat_name = img.split("/")[-1].split(":")[0]
-            tag = img.split(":")[-1]
-            candidates = [f"{MIRROR}/{flat_name}:{tag}"]
-            # 带路径的（coredns/coredns → 扁平化）
-            if "/" in img.replace("registry.k8s.io/", "").split(":")[0]:
-                candidates.insert(0, img.replace("registry.k8s.io", MIRROR))
-
-            for candidate in candidates:
-                exit_code, _, _ = ssh.exec_command(
-                    f"ctr -n k8s.io image pull {candidate} 2>&1 | tail -1", timeout=60
+            pulled = False
+            # ---- 策略 A: 本地 tar 上传导入（优先，零网络依赖） ----
+            local_tar = os.path.join(local_images_dir, tar_name)
+            if os.path.exists(local_tar) and os.path.getsize(local_tar) > 10000:
+                logger.info(f"[{hostname}]   [tar] 上传 {tar_name} ...")
+                ssh.upload_file(local_tar, f"/tmp/{tar_name}")
+                ec, _, err = ssh.exec_command(
+                    f"ctr -n k8s.io image import /tmp/{tar_name} 2>&1", timeout=120
                 )
-                if exit_code == 0:
-                    if candidate != img:
-                        ssh.exec_command(
-                            f"ctr -n k8s.io image tag {candidate} {img} && "
-                            f"ctr -n k8s.io image remove {candidate}", timeout=10
-                        )
-                    logger.info(f"[{hostname}]   ✓ {img.split('/')[-1]}")
-                    break
+                ssh.exec_command(f"rm -f /tmp/{tar_name}", timeout=5)
+                if ec == 0:
+                    pulled = True
+                    logger.info(f"[{hostname}]   [OK] {img_short} 本地导入完成")
+                else:
+                    logger.warning(f"[{hostname}]   [FAIL] {img_short} 本地导入: {err.strip()[-120:]}")
+
+            # ---- 策略 B: 远程镜像源拉取（兜底） ----
+            if not pulled:
+                flat_name = img_short.split(":")[0]
+                tag = img_short.split(":")[-1]
+                candidates = [f"{MIRROR}/{flat_name}:{tag}"]
+                if "/" in img.replace("registry.k8s.io/", "").split(":")[0]:
+                    candidates.insert(0, img.replace("registry.k8s.io", MIRROR))
+                for i, candidate in enumerate(candidates):
+                    logger.info(f"[{hostname}]   [pull] {candidate.split('/')[0]}...")
+                    ec, _, pull_err = ssh.exec_command(
+                        f"ctr -n k8s.io image pull {candidate} 2>&1", timeout=60
+                    )
+                    if ec == 0:
+                        if candidate != img:
+                            ssh.exec_command(
+                                f"ctr -n k8s.io image tag {candidate} {img} && "
+                                f"ctr -n k8s.io image remove {candidate}", timeout=10
+                            )
+                        logger.info(f"[{hostname}]   [OK] {img_short} 远程拉取完成")
+                        pulled = True
+                        break
+                    else:
+                        logger.debug(f"[{hostname}]   候选[{i+1}]: {pull_err.strip()[-100:]}")
+
+            if not pulled:
+                logger.error(f"[{hostname}]   [FAIL] {img_short} 全部方式失败！"
+                             f"节点加入后 kubelet 将尝试直连 registry.k8s.io（国内大概率超时）")
 
         # 执行 join（不用 sudo，SSH 已是 root）
         exit_code, stdout, stderr = ssh.exec_command(
@@ -109,25 +143,38 @@ def _join_single_worker(worker: dict, state: WorkflowStateManager) -> None:
 
         logger.info(f"[{hostname}] 节点加入成功 ✓")
 
-        # 打标签
-        labels = worker.get("labels", {})
-        if labels:
-            master_ip = state.get_global("master_ip")
-            master_ssh = SSHClient(
-                host=master_ip,
-                username=ssh_cfg.get("username", "root"),
-                port=ssh_cfg.get("port", 22),
-                password=ssh_cfg.get("password"),
-                key_file=ssh_cfg.get("key_file"),
+        # 复制 admin.conf 到 Worker，使 kubectl 可用
+        master_ip = state.get_global("master_ip")
+        master_ssh = SSHClient(
+            host=master_ip,
+            username=ssh_cfg.get("username", "root"),
+            port=ssh_cfg.get("port", 22),
+            password=ssh_cfg.get("password"),
+            key_file=ssh_cfg.get("key_file"),
+        )
+        try:
+            master_ssh.connect()
+            # 从 master 下载 admin.conf → 上传到 worker（SFTP，原子写入）
+            admin_tmp = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "runtime", "temp_cache", f"admin_{hostname}.conf"
             )
-            try:
-                master_ssh.connect()
+            os.makedirs(os.path.dirname(admin_tmp), exist_ok=True)
+            master_ssh.download_file("/etc/kubernetes/admin.conf", admin_tmp)
+            ssh.exec_command("mkdir -p $HOME/.kube", sudo=False, timeout=5)
+            ssh.upload_file(admin_tmp, "/root/.kube/config")
+            os.remove(admin_tmp)
+            logger.info(f"[{hostname}] kubectl 配置已同步 ~/.kube/config")
+
+            # 打标签
+            labels = worker.get("labels", {})
+            if labels:
                 for k, v in labels.items():
                     label_cmd = f"kubectl label node {hostname} {k}={v} --overwrite"
                     master_ssh.exec_command(label_cmd, timeout=10)
                 logger.info(f"[{hostname}] 标签已设置: {labels}")
-            finally:
-                master_ssh.close()
+        finally:
+            master_ssh.close()
 
     except (NodeJoinError, TokenExpiredError):
         raise

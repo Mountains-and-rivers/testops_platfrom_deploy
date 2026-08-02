@@ -156,8 +156,8 @@ spec:
     spec:
       containers:
       - name: test-app
-        image: registry.k8s.io/pause:3.10.2
-        imagePullPolicy: Never
+        image: registry.k8s.io/pause:3.10
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
 ---

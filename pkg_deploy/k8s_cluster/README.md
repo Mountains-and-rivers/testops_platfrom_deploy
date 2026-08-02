@@ -70,15 +70,85 @@ k8s_cluster/
 
 ## 支持版本
 
-| 组件 | 支持版本 | 配置位置 |
-|------|---------|---------|
-| **Kubernetes** | **v1.29.6 / v1.30.2 / v1.31.x** | `config/software_version.yaml` → `kubernetes.default` |
-| Containerd | 1.7.x (1.7.11 / 1.7.13 / 1.7.15) | `config/software_version.yaml` → `containerd.default` |
-| runc | 1.1.10 / 1.1.12 | `config/software_version.yaml` → `runc.default` |
-| CNI Plugins | 1.3.0 / 1.4.0 | `config/software_version.yaml` → `cni_plugins.default` |
-| Calico | v3.26.4 / v3.27.0 / v3.27.3 | `config/software_version.yaml` → `calico.default` |
-| etcd | 3.5.11 / 3.5.12 | `config/software_version.yaml` → `etcd.default` |
-| 目标 OS | **CentOS Stream 9** / RHEL 8.x | `config/system_init.yaml` |
+### 当前配置版本
+
+| 组件 | 当前版本 | 允许版本 | 配置位置 |
+|------|---------|---------|---------|
+| **Kubernetes** | **v1.32.13** | v1.31.10 / v1.33.3 | `config/software_version.yaml` → `kubernetes` |
+| Containerd | **2.2.6** | 2.3.3 | `config/software_version.yaml` → `containerd` |
+| runc | **1.2.5** | 1.1.15 | `config/software_version.yaml` → `runc` |
+| CNI Plugins | **1.6.2** | 1.5.1 | `config/software_version.yaml` → `cni_plugins` |
+| Calico | **v3.29.1** | v3.28.2 / v3.29.0 | `config/software_version.yaml` → `calico` |
+| etcd (外部) | **3.5.16** | 3.5.15 | `config/software_version.yaml` → `etcd` |
+| CoreDNS (配置) | **v1.11.3** | — | `config/software_version.yaml` → `coredns` |
+| pause (配置) | **3.10** | — | `config/software_version.yaml` → `pause` |
+| 目标 OS | **CentOS Stream 9** | RHEL 8.x/9.x | `config/system_init.yaml` |
+
+### Kubeadm 捆绑组件版本（K8s 1.32）
+
+以下版本由 `kubeadm init` 根据目标 K8s 版本自动确定，无需手动配置：
+
+| 组件 | 镜像 | K8s 1.31 | **K8s 1.32** | K8s 1.33 |
+|------|------|----------|-------------|----------|
+| **kube-apiserver** | `registry.k8s.io/kube-apiserver` | v1.31.x | **v1.32.x** | v1.33.x |
+| **kube-controller-manager** | `registry.k8s.io/kube-controller-manager` | v1.31.x | **v1.32.x** | v1.33.x |
+| **kube-scheduler** | `registry.k8s.io/kube-scheduler` | v1.31.x | **v1.32.x** | v1.33.x |
+| **kube-proxy** | `registry.k8s.io/kube-proxy` | v1.31.x | **v1.32.x** | v1.33.x |
+| **CoreDNS** | `registry.k8s.io/coredns/coredns` | v1.11.1 | **v1.11.3** | v1.11.3 |
+| **etcd** | `registry.k8s.io/etcd` | 3.5.15-0 | **3.5.16-0** | 3.5.16-0 |
+| **pause** | `registry.k8s.io/pause` | 3.10 | **3.10** | 3.10 |
+
+> **注意 pause 版本差异**: `kubeadm config images list` 输出 `pause:3.10`，但 `kubeadm init` 执行后会将 containerd 的 `sandbox_image` 覆写为 `pause:3.10.1`。两个版本完全兼容（pause 是极简 init 容器，仅负责创建网络命名空间）。containerd 实际使用的 sandbox 版本以 `grep sandbox_image /etc/containerd/config.toml` 为准。
+
+### 版本偏差策略（Kubernetes Version Skew Policy）
+
+Kubernetes 官方规定集群内不同组件允许的版本差异（[官方文档](https://kubernetes.io/releases/version-skew-policy/)）：
+
+| 组件 | 允许偏差（相对于 kube-apiserver） | 说明 |
+|------|---------------------------------|------|
+| **kube-apiserver** | 基准版本 **N** | 所有组件以此为参考 |
+| **kube-controller-manager** | **= N** | 不得比 apiserver 新或旧 |
+| **kube-scheduler** | **= N** | 不得比 apiserver 新或旧 |
+| **kubelet** | **N ~ N-2** | 最多比 apiserver 旧 2 个 minor 版本 |
+| **kube-proxy** | **N ~ N-1** | 最多比 apiserver 旧 1 个 minor 版本（网络 API 兼容性要求更严） |
+| **kubectl** | **N+1 ~ N-1** | 可比 apiserver 新或旧 1 个 minor 版本 |
+| **kubeadm** | **= N** | 部署工具版本必须等于目标集群版本 |
+
+```
+示例（当前 K8s 1.32.13 集群）：
+  kube-apiserver:        1.32.13  ← 基准 N
+  controller/scheduler:  1.32.13  ← = N
+  kube-proxy:            1.32.13  ← N ~ N-1 ✓
+  kubelet:               1.32.13  ← N ~ N-2 ✓
+  kubectl:               1.32.13  ← N+1 ~ N-1 ✓
+  kubeadm:               1.32.13  ← = N
+```
+
+### K8s ↔ 运行时兼容性
+
+| K8s 版本 | containerd 最低 | runc 最低 | CNI Plugins 最低 |
+|----------|----------------|----------|-----------------|
+| **1.32** | >= 1.7.0 | >= 1.1.0 | >= 1.1.1 |
+| 1.31 | >= 1.7.0 | >= 1.1.0 | >= 1.1.1 |
+| 1.33 | >= 1.7.0 | >= 1.1.0 | >= 1.1.1 |
+
+### K8s ↔ Calico 兼容性
+
+| K8s 版本 | Calico 最低版本 | 推荐版本 |
+|----------|---------------|---------|
+| **1.32** | **>= v3.29.0** | v3.29.1 |
+| 1.31 | >= v3.28.0 | v3.28.2 |
+| 1.33 | >= v3.29.0 | v3.29.1 |
+
+### K8s ↔ pause 版本对应关系
+
+| K8s 版本 | `kubeadm image list` 输出 | containerd sandbox 实际写入 |
+|----------|--------------------------|---------------------------|
+| 1.28 – 1.29 | pause:3.9 | pause:3.9 |
+| 1.30 – 1.31 | pause:3.10 | pause:3.10 |
+| **1.32 – 1.36** | **pause:3.10** | **pause:3.10.1** |
+
+> **说明**: 从 K8s 1.32 开始，kubeadm init 写入 containerd 的 sandbox 版本比 `kubeadm config images list` 输出的高一个 patch 号。部署工具已兼容此差异，会自动追加 sandbox 版本到预拉取列表。
 
 ## 部署流程（8 阶段详解）
 
@@ -436,18 +506,18 @@ software_version:
   kubernetes:
     default: "1.29.6"                  # 默认安装版本
     available:                          # 可选版本列表
-      - "1.29.6"
-      - "1.30.2"
-      - "1.31.0"
+      - "1.31.10"
+      - "1.32.13"
+      - "1.33.3"
   containerd:
-    default: "1.7.13"
+    default: "2.2.6"
   calico:
-    default: "v3.27.0"
+    default: "v3.29.1"
   # 版本兼容性矩阵（自动校验）
   compatibility:
-    kubernetes_1_29:
-      containerd: ">=1.7.0,<1.8.0"
-      calico: ">=3.27.0,<3.28.0"
+    kubernetes_1_32:
+      containerd: ">=1.7.0"
+      calico: ">=3.29.0"
 ```
 
 ### `config/system_init.yaml` — 系统初始化

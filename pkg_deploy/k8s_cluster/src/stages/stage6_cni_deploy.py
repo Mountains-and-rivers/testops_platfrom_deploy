@@ -56,7 +56,7 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
         ssh.connect()
 
         # 从配置读取 Calico 版本
-        calico_ver = calico_cfg.get("version", "v3.27.0")
+        calico_ver = calico_cfg.get("version", "v3.29.1")
 
         # Calico manifest URL（国内优先 ghproxy）
         CALICO_URLS = [

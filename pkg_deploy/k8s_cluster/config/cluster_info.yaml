@@ -26,7 +26,7 @@ cluster_info:
   cni:
     plugin: "calico"                        # calico | flannel | cilium
     calico:
-      version: "v3.27.0"
+      version: "v3.29.1"
       encapsulation: "VXLANCrossSubnet"     # VXLANAlways | VXLANCrossSubnet | IPIP | None
       block_size: 26
       nat_outgoing: true

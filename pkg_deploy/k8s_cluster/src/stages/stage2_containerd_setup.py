@@ -135,7 +135,7 @@ def _setup_containerd_on_node(node: dict, version: str, mirror_map: dict,
         _, cg_check, _ = ssh.exec_command(
             "grep -c 'SystemdCgroup = true' /etc/containerd/config.toml 2>/dev/null || echo 0"
         )
-        if int(cg_check.strip() or 0) == 0:
+        if int((cg_check.strip() or "0").splitlines()[0]) == 0:
             ssh.exec_command(
                 "sed -i 's/SystemdCgroup\\s*=\\s*\\w\\+/SystemdCgroup = true/' "
                 "/etc/containerd/config.toml 2>/dev/null || true",
@@ -255,7 +255,7 @@ def _verify_containerd(ssh: SSHClient, hostname: str, expected_version: str,
     _, cgroup, _ = ssh.exec_command(
         "grep 'SystemdCgroup = true' /etc/containerd/config.toml | wc -l", sudo=False
     )
-    if int(cgroup.strip() or 0) > 0:
+    if int((cgroup.strip() or "0").splitlines()[0]) > 0:
         checks.append(("cgroup=systemd", "PASS", "已启用"))
     else:
         checks.append(("cgroup=systemd", "FAIL", "未找到"))
@@ -274,7 +274,7 @@ def _verify_containerd(ssh: SSHClient, hostname: str, expected_version: str,
     _, cfg_err, _ = ssh.exec_command(
         "containerd config dump 2>&1 | grep -c 'Ignoring unknown key' || true", sudo=False
     )
-    err_count = int(cfg_err.strip() or 0)
+    err_count = int((cfg_err.strip() or "0").splitlines()[0])
     if err_count == 0:
         checks.append(("配置有效性", "PASS", "无警告"))
     else:
@@ -305,7 +305,7 @@ def _verify_containerd(ssh: SSHClient, hostname: str, expected_version: str,
         _, dirs, _ = ssh.exec_command(
             "ls /etc/containerd/certs.d/ 2>/dev/null | wc -l", sudo=False
         )
-        actual_dirs = int(dirs.strip() or 0)
+        actual_dirs = int((dirs.strip() or "0").splitlines()[0])
         if actual_dirs >= certs_count:
             checks.append(("镜像加速", "PASS", f"{actual_dirs} 个仓库"))
         else:

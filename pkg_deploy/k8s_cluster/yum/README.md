@@ -70,7 +70,7 @@ software_version.yaml  kubernetes.default = "1.32.13"
 |------|------|------|
 | Kubernetes | `v1.32.13` | `kubeadm config images list` |
 | pause | `3.10.1` | kubeadm 写入 containerd 的实际版本 |
-| Calico | `v3.27.0` | `cluster_info.yaml` cni.calico.version |
+| Calico | `v3.29.1` | `cluster_info.yaml` cni.calico.version |
 | etcd | `3.5.16-0` | `kubeadm config images list` |
 | CoreDNS | `v1.11.3` | `kubeadm config images list` |
 ```

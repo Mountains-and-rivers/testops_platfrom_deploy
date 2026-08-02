@@ -240,7 +240,7 @@ def _verify_kube(ssh: SSHClient, hostname: str, expected_version: str) -> None:
     _, cfg, _ = ssh.exec_command(
         "grep -c 'cgroup-driver=systemd' /etc/sysconfig/kubelet 2>/dev/null || echo 0"
     )
-    if int(cfg.strip() or 0) > 0:
+    if int((cfg.strip() or "0").splitlines()[0]) > 0:
         checks.append(("kubelet配置", "PASS", "cgroup=systemd + containerd socket"))
     else:
         checks.append(("kubelet配置", "FAIL", "配置缺失或错误"))

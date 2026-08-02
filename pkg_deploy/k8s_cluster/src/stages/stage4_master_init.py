@@ -44,7 +44,7 @@ def _is_master_initialized(ssh: SSHClient) -> bool:
         "--no-headers 2>/dev/null | grep -c ' Ready' || echo 0",
         sudo=False, timeout=10
     )
-    count = int(out.strip() or 0)
+    count = int((out.strip() or "0").splitlines()[0])
     if count > 0:
         logger.info(f"检测到已初始化的集群 ({count} 个 Ready 节点)，跳过 kubeadm init")
         return True
@@ -205,7 +205,7 @@ def _verify_master(ssh: SSHClient, hostname: str, expected_version: str) -> None
         f"{kubectl} get secret -n kube-system 2>/dev/null | grep -c 'cert' || echo 0",
         timeout=10
     )
-    cert_count = int(certs.strip() or 0)
+    cert_count = int((certs.strip() or "0").splitlines()[0])
     if cert_count > 0:
         checks.append(("证书/Secret", "PASS", f"{cert_count} 个"))
     else:
@@ -269,7 +269,10 @@ def run_master_init(state: WorkflowStateManager) -> None:
     pod_cidr = net.get("pod_cidr", "10.244.0.0/16")
     service_cidr = net.get("service_cidr", "10.96.0.0/12")
     svc_node_port = net.get("service_node_port_range", "30000-32767")
-    k8s_version = state.get_global("k8s_version", "1.36.3")
+    # 从配置文件读取版本作为 fallback，不再硬编码
+    _ver_cfg = YAMLHelper.load(os.path.join(CONFIG_DIR, "software_version.yaml"))
+    _cfg_default_ver = _ver_cfg.get("software_version", {}).get("kubernetes", {}).get("default", "1.32.13")
+    k8s_version = state.get_global("k8s_version", _cfg_default_ver)
     kube_proxy_mode = cluster_info.get("cluster_info", {}).get("kube_proxy_mode", "iptables")
     # 镜像仓库：可从 cluster_info.yaml 配置，默认 registry.k8s.io
     image_repo = cluster_info.get("cluster_info", {}).get("container_runtime", {}).get(
@@ -382,21 +385,6 @@ def run_master_init(state: WorkflowStateManager) -> None:
         if sandbox_ver and sandbox_ver not in images:
             images.append(sandbox_ver)
             logger.info(f"[{hostname}]   追加 containerd sandbox 镜像: {sandbox_ver}")
-        # 防御：kubeadm 列表的 pause 版本可能比 containerd 实际配置低一个 patch 号
-        # 例如 kubeadm 列 pause:3.10，但 containerd 实际用 pause:3.10.1
-        for img in list(images):
-            if '/pause:' in img:
-                parts = img.split(':')
-                ver_parts = parts[1].split('.')
-                if len(ver_parts) == 3:
-                    try:
-                        ver_parts[2] = str(int(ver_parts[2]) + 1)
-                        bumped = f"{parts[0]}:{'.'.join(ver_parts)}"
-                        if bumped not in images:
-                            images.append(bumped)
-                            logger.info(f"[{hostname}]   追加 pause patch+1 镜像: {bumped}")
-                    except ValueError:
-                        pass
         logger.info(f"[{hostname}]   共 {len(images)} 个镜像")
 
         os.makedirs(IMAGES_DIR, exist_ok=True)
@@ -445,10 +433,10 @@ def run_master_init(state: WorkflowStateManager) -> None:
                 )
                 if exit_code == 0:
                     _, check, _ = ssh.exec_command(
-                        f"ctr -n k8s.io image ls -q | grep -cF '{image}' || echo 0",
+                        f"ctr -n k8s.io image ls -q 2>/dev/null | grep -qF '{image}' && echo YES || echo NO",
                         sudo=False, timeout=10
                     )
-                    if check.strip() != "0":
+                    if check.strip() == "YES":
                         import_ok = True
                         logger.info(f"[{hostname}]   ✅ {img_name} 本地加载完成")
 
@@ -504,7 +492,7 @@ def run_master_init(state: WorkflowStateManager) -> None:
 
         # 2.4 预拉取 Calico CNI 镜像（避免 stage6 部署时去 quay.io 直拉超时）
         #     containerd mirror 自动重定向 quay.io → DaoCloud 加速
-        calico_ver = cluster_info.get("cluster_info", {}).get("cni", {}).get("calico", {}).get("version", "v3.27.0")
+        calico_ver = cluster_info.get("cluster_info", {}).get("cni", {}).get("calico", {}).get("version", "v3.29.1")
         calico_images = [
             f"quay.io/calico/cni:{calico_ver}",
             f"quay.io/calico/node:{calico_ver}",
@@ -570,10 +558,10 @@ def run_master_init(state: WorkflowStateManager) -> None:
         sandbox_needed = sandbox_needed.strip()
         if sandbox_needed:
             _, has_sandbox, _ = ssh.exec_command(
-                f"ctr -n k8s.io image ls -q 2>/dev/null | grep -cF '{sandbox_needed}' || echo 0",
+                f"ctr -n k8s.io image ls -q 2>/dev/null | grep -qF '{sandbox_needed}' && echo YES || echo NO",
                 timeout=5
             )
-            if has_sandbox.strip() == "0":
+            if has_sandbox.strip() != "YES":
                 sandbox_tar_name = sandbox_needed.split("/")[-1].replace(":", "_") + ".tar"
                 sandbox_local = os.path.join(IMAGES_DIR, sandbox_tar_name)
                 if os.path.exists(sandbox_local):
@@ -715,10 +703,10 @@ def run_master_init(state: WorkflowStateManager) -> None:
                     # 等待 kubelet 重新注册节点
                     for i in range(30):
                         _, node_out, _ = ssh.exec_command(
-                            "kubectl --kubeconfig=/etc/kubernetes/admin.conf get node --no-headers 2>/dev/null | grep -c Ready || echo 0",
+                            "kubectl --kubeconfig=/etc/kubernetes/admin.conf get node --no-headers 2>/dev/null | grep -q Ready && echo YES || echo NO",
                             timeout=10
                         )
-                        if node_out.strip() != "0":
+                        if node_out.strip() == "YES":
                             logger.info(f"[{hostname}] 节点已注册且 Ready")
                             break
                         time.sleep(5)
