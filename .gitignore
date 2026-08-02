@@ -43,8 +43,7 @@ credentials/
 Thumbs.db
 Desktop.ini
 
-# 编译依赖压缩包（体积大，不上传）
-# 忽略 pkg_deploy 下所有压缩包/离线镜像包
+# ── 压缩包 / 离线镜像（体积大，不上传）──
 pkg_deploy/**/*.tar
 pkg_deploy/**/*.tar.gz
 pkg_deploy/**/*.tar.xz
@@ -60,3 +59,24 @@ pkg_deploy/**/*.rpm
 pkg_deploy/**/*.deb
 pkg_deploy/k8s_cluster/images/calico/
 scripts/*.tar
+
+# ── 二进制文件 ──
+*.exe
+*.dll
+*.so
+*.o
+*.a
+*.out
+*.bin
+
+# ── 语言运行时包 ──
+*node-v*-linux-x64.tar.xz
+*go*.linux-amd64.tar.gz
+*ruby-*.tar.gz
+
+# ── 预编译产物目录 ──
+pkg_deploy/gitlab/gitlab_pkg/gitlab/
+pkg_deploy/gitlab/gitlab_pkg/gitaly/
+pkg_deploy/gitlab/gitlab_pkg/gitlab-shell/
+pkg_deploy/gitlab/gitlab_pkg/gitlab-workhorse/
+pkg_deploy/gitlab/gitlab_pkg/gitlab-pages/

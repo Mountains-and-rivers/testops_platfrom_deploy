@@ -215,6 +215,20 @@ fi
 chown -R ${NGINX_USER}:${NGINX_USER} "${INSTALL_DIR}/conf" 2>/dev/null || true
 chown root:root "${INSTALL_DIR}/sbin/nginx" 2>/dev/null || true  # nginx 需要 root 绑定 1024↓ 端口
 
+# ── 部署 conf.d 子配置模板（脚本同目录 conf.d/*.conf → 安装目录 conf/conf.d/）──
+if [ -d "${SCRIPT_DIR}/conf.d" ]; then
+    _CONF_COUNT=0
+    for _tpl in "${SCRIPT_DIR}/conf.d/"*.conf; do
+        [ -f "${_tpl}" ] 2>/dev/null || continue
+        _name=$(basename "${_tpl}")
+        cp "${_tpl}" "${INSTALL_DIR}/conf/conf.d/${_name}"
+        # 替换 common 变量（GitLab 专用变量由上层脚本二次替换）
+        sed -i "s|{{NGINX_PORT}}|${NGINX_PORT}|g"   "${INSTALL_DIR}/conf/conf.d/${_name}"
+        _CONF_COUNT=$((_CONF_COUNT + 1))
+    done
+    [ "${_CONF_COUNT}" -gt 0 ] && info "  ✓ conf.d 模板已部署 (${_CONF_COUNT} 个)"
+fi
+
 # 语法检查
 ${_NGINX_BIN} -t -c "${INSTALL_DIR}/conf/nginx.conf" 2>&1 || warn "  配置语法检查未通过"
 info "  ✓ nginx.conf → ${INSTALL_DIR}/conf/nginx.conf"

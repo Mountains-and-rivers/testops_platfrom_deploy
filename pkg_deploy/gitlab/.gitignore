@@ -1,4 +1,4 @@
-# 二进制 & 压缩包 — 不上传 git
+# 压缩包 — 不上传 git
 *.tar
 *.tar.gz
 *.tar.xz
@@ -12,6 +12,19 @@
 *.rar
 *.rpm
 *.deb
-# 无扩展名二进制工具
+
+# 语言运行时二进制（编译产物，体积巨大）
+node-v*-linux-x64.tar.xz
+go*.linux-amd64.tar.gz
+ruby-*.tar.gz
+
+# 无扩展名工具二进制
 psql
 redis-cli
+
+# 编译产物目录（预编译包）
+gitlab_pkg/gitlab/
+gitlab_pkg/gitaly/
+gitlab_pkg/gitlab-shell/
+gitlab_pkg/gitlab-workhorse/
+gitlab_pkg/gitlab-pages/

@@ -104,6 +104,22 @@ id git &>/dev/null && info "  ✓ git 用户" || { warn "  ✗ git 用户不存�
     && info "  ✓ gitlab-shell: ${SHELL_DIR}" \
     || { warn "  ✗ gitlab-shell 缺失: ${SHELL_DIR}"; FAILED=1; }
 
+# ── 生成 gitlab-shell config.yml（SSH clone 必需）──
+if [ -f "${SHELL_DIR}/config.yml.example" ] && [ ! -f "${SHELL_DIR}/config.yml" ]; then
+    sed 's|gitlab_url: http://localhost:8080|gitlab_url: http://127.0.0.1:3000|' "${SHELL_DIR}/config.yml.example" > "${SHELL_DIR}/config.yml"
+    sed -i 's|secret_file: .*|secret_file: '"${GITLAB_DIR}"'/.gitlab_shell_secret|' "${SHELL_DIR}/config.yml"
+    chown git:git "${SHELL_DIR}/config.yml"
+    chmod 640 "${SHELL_DIR}/config.yml"
+    chown -R git:git "${SHELL_DIR}/bin/" 2>/dev/null || true
+    info "  ✓ gitlab-shell config.yml 已生成"
+elif [ -f "${SHELL_DIR}/config.yml" ]; then
+    # 已有 config.yml，修复常见配置错误
+    if grep -q 'localhost:8080' "${SHELL_DIR}/config.yml" 2>/dev/null; then
+        sed -i 's|gitlab_url: http://localhost:8080|gitlab_url: http://127.0.0.1:3000|' "${SHELL_DIR}/config.yml"
+        info "  ✓ gitlab-shell gitlab_url: 8080 → 3000"
+    fi
+fi
+
 # 检查 GitLab Workhorse
 [ -f "${WORKHORSE_DIR}/gitlab-workhorse" ] && info "  ✓ workhorse: ${WORKHORSE_DIR}" \
     || { warn "  ✗ workhorse 未编译: ${WORKHORSE_DIR}"; FAILED=1; }
@@ -295,8 +311,25 @@ fi
 if grep -q 'gitaly_address:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
     sudo -u git -H sed -i "s|gitaly_address:.*|gitaly_address: unix:${GITLAB_DIR}/tmp/sockets/private/gitaly.socket|" "${GITLAB_DIR}/config/gitlab.yml"
 fi
-if grep -q 'token:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
-    sudo -u git -H sed -i "/^  gitaly:/,/^  [a-z]/{s|^    token:.*|    token: '${_gitaly_token}'|}" "${GITLAB_DIR}/config/gitlab.yml"
+# 同步 gitlab.yml gitaly token（生产环境，第一个 gitaly: 块）
+if grep -q 'gitaly:' "${GITLAB_DIR}/config/gitlab.yml" 2>/dev/null; then
+    sudo -u git -H awk -v t="${_gitaly_token}" '
+        /^  gitaly:/ && !done { found=1 }
+        found && /token:/ { sub(/token:.*/, "token: \x27" t "\x27"); found=0; done=1 }
+        { print }
+    ' "${GITLAB_DIR}/config/gitlab.yml" > /tmp/gitlab.yml.tmp \
+        && mv /tmp/gitlab.yml.tmp "${GITLAB_DIR}/config/gitlab.yml"
+    chown git:git "${GITLAB_DIR}/config/gitlab.yml"
+fi
+
+# 重置 Gitaly 元数据（防止 token 变更后 hmac 签名错误）
+if [ -f /home/git/repositories/.gitaly-metadata ]; then
+    _CUR_GITALY_TOKEN=$(grep -oP "token\s*=\s*'\K[^']+" "${GITALY_DIR}/config.toml" 2>/dev/null || echo "")
+    _CUR_META_HMAC=$(grep -oP '"hmac_secret":"\K[^"]+' /home/git/repositories/.gitaly-metadata 2>/dev/null || echo "")
+    if [ -n "${_CUR_GITALY_TOKEN}" ] && [ "${_CUR_META_HMAC}" != "${_CUR_GITALY_TOKEN}" ]; then
+        rm -f /home/git/repositories/.gitaly-metadata
+        info "  ✓ Gitaly 元数据已重置（token 已更新）"
+    fi
 fi
 
 # ── 检查是否已初始化 ──
@@ -420,79 +453,143 @@ else
     fi
     rm -f "${_WEBPACK_DONE_MARKER}"
 
-    # 根据可用内存自动设定 Node 堆大小
-    # 可通过环境变量手动指定：NODE_HEAP_MB=7168 bash install_gitlab_source.sh
+    # ── 自适应内存计算（控制 worker 并行数 + 堆大小防止 OOM）──
+    # OOM 根因: terser-webpack-plugin 默认并行度 = CPU 核数 - 1，
+    #   每个 worker 是独立 fork 子进程，继承 NODE_OPTIONS --max-old-space-size，
+    #   5 worker × 7GB = 35GB 虚拟地址空间 → OOM Killer (total-vm 超限)
+    # 方案: (1) 通过 --require 注入脚本限制 os.cpus() → 减少并行 worker 数
+    #       (2) 按公式分配每进程 V8 堆 → 堆 × 进程数 ≤ 60% 虚拟内存
+    # 可通过环境变量覆盖: NODE_HEAP_MB=2048 WEBPACK_PARALLEL=2 bash ...
     if [ -n "${NODE_HEAP_MB:-}" ]; then
         _NODE_HEAP="${NODE_HEAP_MB}"
         info "  使用手动指定的 Node 堆: ${_NODE_HEAP}MB"
-    else
+    fi
+    if [ -n "${WEBPACK_PARALLEL:-}" ]; then
+        _WEBPACK_PARALLEL="${WEBPACK_PARALLEL}"
+        info "  使用手动指定的 webpack 并行度: ${_WEBPACK_PARALLEL}"
+    fi
+
+    # 自动计算（未手动指定时）
+    if [ -z "${_NODE_HEAP:-}" ] || [ -z "${_WEBPACK_PARALLEL:-}" ]; then
         _MEM_TOTAL_GB=$(awk '/MemTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 8)
         _SWAP_TOTAL=$(awk '/SwapTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
         _VIRT_GB=$((_MEM_TOTAL_GB + _SWAP_TOTAL))
-        # 堆 = 虚拟内存 * 60%，min 4096, max 8192
-        _NODE_HEAP=$(( _VIRT_GB * 60 / 100 * 1024 ))
-        [ "${_NODE_HEAP}" -lt 4096 ] && _NODE_HEAP=4096
-        [ "${_NODE_HEAP}" -gt 8192 ] && _NODE_HEAP=8192
-        # 虚拟内存不足 10GB 时自动创建 swap
-        if [ "${_VIRT_GB}" -lt 10 ]; then
-            _SWAP_NEEDED=$(( (12 - _VIRT_GB) * 1024 ))
-            _SWAP_FILE="/swapfile"
-            warn "  虚拟内存仅 ${_VIRT_GB}GB，webpack 极易 OOM，自动创建 ${_SWAP_NEEDED}MB swap..."
+        _CPU_COUNT=$(nproc 2>/dev/null || echo 4)
+        info "  物理: ${_MEM_TOTAL_GB}GB, Swap: ${_SWAP_TOTAL}GB, 虚拟: ${_VIRT_GB}GB, CPU: ${_CPU_COUNT}"
 
-            # 如果 swap 已激活就直接用
+        # 虚拟内存 < 16GB 时自动创建/扩容 swap（webpack 主进程实测需 ≥4GB 堆）
+        if [ "${_VIRT_GB}" -lt 16 ]; then
+            _SWAP_TARGET=16
+            _SWAP_NEEDED=$(( (_SWAP_TARGET - _VIRT_GB) * 1024 ))
+            _SWAP_FILE="/swapfile"
+            warn "  虚拟内存 ${_VIRT_GB}GB < ${_SWAP_TARGET}GB，创建 ${_SWAP_NEEDED}MB swap..."
             if swapon --show 2>/dev/null | grep -q "${_SWAP_FILE}"; then
-                info "  ✓ swap 已激活，跳过创建"
-            else
-                # 文件存在但未激活 → 可能是上次残留的无效文件，删除重建
-                if [ -f "${_SWAP_FILE}" ]; then
-                    warn "  ${_SWAP_FILE} 存在但未激活，重建..."
+                # 已有 swap 但总量不够，尝试扩展现有 swap 或追加
+                _CUR_SWAP_MB=$(awk '/SwapTotal/{printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)
+                if [ "${_CUR_SWAP_MB}" -lt "$(( (_SWAP_TARGET - _MEM_TOTAL_GB) * 1024 ))" ]; then
                     swapoff "${_SWAP_FILE}" 2>/dev/null || true
                     rm -f "${_SWAP_FILE}"
+                    dd if=/dev/zero of="${_SWAP_FILE}" bs=1M count="$(( (_SWAP_TARGET - _MEM_TOTAL_GB) * 1024 ))" 2>/dev/null || true
+                    chmod 600 "${_SWAP_FILE}"
+                    mkswap "${_SWAP_FILE}" 2>/dev/null && swapon "${_SWAP_FILE}" 2>/dev/null || true
+                else
+                    info "  ✓ swap 已充足"
                 fi
-                # 创建并激活 swap
+            else
+                [ -f "${_SWAP_FILE}" ] && { swapoff "${_SWAP_FILE}" 2>/dev/null || true; rm -f "${_SWAP_FILE}"; }
                 dd if=/dev/zero of="${_SWAP_FILE}" bs=1M count="${_SWAP_NEEDED}" 2>/dev/null || true
                 chmod 600 "${_SWAP_FILE}"
                 mkswap "${_SWAP_FILE}" 2>/dev/null && swapon "${_SWAP_FILE}" 2>/dev/null || true
             fi
-
             if swapon --show 2>/dev/null | grep -q "${_SWAP_FILE}"; then
                 _SWAP_TOTAL_NEW=$(awk '/SwapTotal/{printf "%d", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)
                 _VIRT_GB=$((_MEM_TOTAL_GB + _SWAP_TOTAL_NEW))
-                _NODE_HEAP=$(( _VIRT_GB * 60 / 100 * 1024 ))
-                [ "${_NODE_HEAP}" -lt 4096 ] && _NODE_HEAP=4096
-                [ "${_NODE_HEAP}" -gt 8192 ] && _NODE_HEAP=8192
-                info "  ✓ swap 已启用，虚拟内存: ${_VIRT_GB}GB, Node 堆: ${_NODE_HEAP}MB"
+                info "  ✓ swap 就绪，虚拟: ${_VIRT_GB}GB"
                 grep -q "${_SWAP_FILE}" /etc/fstab 2>/dev/null || echo "${_SWAP_FILE} none swap sw 0 0" >> /etc/fstab
             else
-                warn "  ✗ swap 创建失败，继续尝试编译（可能 OOM）"
+                warn "  ✗ swap 创建失败，当前虚拟: ${_VIRT_GB}GB"
             fi
         fi
+
+        # ── 并行度 + 堆大小 ──
+        # 实测数据（GitLab 19.x, 9GB RAM, 2 次失败）:
+        #   2252MB → OOM (webpack 主进程 GC 无效)
+        #   3379MB → OOM (peak live 3.3GB, 需要 ~30% GC 冗余 = 4.3GB+)
+        # 结论: 主进程至少需要 4096MB 堆，推荐 4500+
+        # 约束: (workers+1) × heap ≤ 80% 虚拟内存 (1w) / 70% (2w+)
+        if [ -z "${_WEBPACK_PARALLEL:-}" ]; then
+            # virt < 16GB 强制单 worker（多 worker 分堆后每进程不够 4GB）
+            if [ "${_VIRT_GB}" -lt 16 ]; then
+                _WEBPACK_PARALLEL=1
+            else
+                _WEBPACK_PARALLEL=$(( (_VIRT_GB - 6) / 5 + 1 ))
+                [ "${_WEBPACK_PARALLEL}" -gt "${_CPU_COUNT}" ] && _WEBPACK_PARALLEL="${_CPU_COUNT}"
+            fi
+        fi
+
+        if [ -z "${_NODE_HEAP:-}" ]; then
+            _PROC_COUNT=$((_WEBPACK_PARALLEL + 1))
+            # 单 worker: 80% 虚拟给 2 进程；多 worker: 70%
+            if [ "${_WEBPACK_PARALLEL}" -eq 1 ]; then
+                _NODE_HEAP=$(( _VIRT_GB * 1024 * 80 / 100 / _PROC_COUNT ))
+            else
+                _NODE_HEAP=$(( _VIRT_GB * 1024 * 70 / 100 / _PROC_COUNT ))
+            fi
+            # 循环降 worker 直到每进程堆 ≥ 4096
+            while [ "${_WEBPACK_PARALLEL}" -gt 1 ] && [ "${_NODE_HEAP}" -lt 4096 ]; do
+                _WEBPACK_PARALLEL=$((_WEBPACK_PARALLEL - 1))
+                _PROC_COUNT=$((_WEBPACK_PARALLEL + 1))
+                _NODE_HEAP=$(( _VIRT_GB * 1024 * 70 / 100 / _PROC_COUNT ))
+            done
+            [ "${_NODE_HEAP}" -lt 4096 ] && _NODE_HEAP=4096
+            [ "${_NODE_HEAP}" -gt 5120 ] && _NODE_HEAP=5120
+        fi
+        info "  webpack 并行: ${_WEBPACK_PARALLEL} worker, 堆: ${_NODE_HEAP}MB/进程"
     fi
-    info "  编译前端资源（Node 堆: ${_NODE_HEAP}MB, 虚拟内存: ${_VIRT_GB:-?}GB, 约 10-30 分钟）..."
+
+    # ── 创建 CPU 限制 preload 脚本 ──
+    # terser-webpack-plugin 默认并行度 = os.cpus().length - 1
+    # 通过 NODE_OPTIONS="--require <脚本>" 注入 monkey-patch，
+    # 使 os.cpus() 只返回前 _WEBPACK_PARALLEL+1 个核心（+1 给主进程的 webpack orchestration）
+    _CPU_LIMIT_JS="/tmp/limit_cpus_$$.js"
+    _CPU_VISIBLE=$((_WEBPACK_PARALLEL + 1))
+    cat > "${_CPU_LIMIT_JS}" << CPUEOF
+const os = require('os');
+const origCpus = os.cpus.bind(os);
+const limit = ${_CPU_VISIBLE};
+os.cpus = function() { return origCpus().slice(0, limit); };
+CPUEOF
+    chmod 644 "${_CPU_LIMIT_JS}"
+    info "  CPU 可见数限制: ${_CPU_VISIBLE} (→ terser 并行 ${_WEBPACK_PARALLEL})"
+
+    info "  编译前端资源（约 10-30 分钟，日志: /tmp/webpack_compile.log）..."
 
     _WEBPACK_LOG="/tmp/webpack_compile.log"
+    # --require 注入 os.cpus() monkey-patch（主进程 + 所有 worker-farm 子进程均继承）
+    # --max-old-space-size 限制每个 Node 进程的 V8 堆
+    # 两者配合: (workers+1) × heap ≤ 60% 虚拟内存
     if sudo -u git -H env PATH="/usr/local/ruby/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH" \
-        NODE_OPTIONS="--max-old-space-size=${_NODE_HEAP}" \
+        NODE_OPTIONS="--require ${_CPU_LIMIT_JS} --max-old-space-size=${_NODE_HEAP}" \
         bundle exec rake gitlab:assets:compile RAILS_ENV=production NODE_ENV=production 2>&1 | tee "${_WEBPACK_LOG}"; then
         touch "${_WEBPACK_DONE_MARKER}"
         info "  ✓ 前端资源编译完成"
+        rm -f "${_CPU_LIMIT_JS}"
     else
+        rm -f "${_CPU_LIMIT_JS}"
         _TAIL_LOG=$(tail -30 "${_WEBPACK_LOG}" 2>/dev/null || true)
-        # 区分 CRLF 错误、内存溢出、其他错误
         if echo "${_TAIL_LOG}" | grep -q "bash.*\r\|Permission denied.*bash"; then
             warn "  日志: ${_WEBPACK_LOG}"
             err "前端资源编译失败：检测到 Windows 换行符 (CRLF) 残留"
-        elif echo "${_TAIL_LOG}" | grep -q "SIGKILL\|heap out of memory\|OOM\|SIGABRT\|CALL_AND_RETRY_LAST"; then
+        elif echo "${_TAIL_LOG}" | grep -q "SIGKILL\|heap out of memory\|OOM\|SIGABRT\|CALL_AND_RETRY_LAST\|EPIPE"; then
             warn "  日志: ${_WEBPACK_LOG}"
-            err "前端资源编译失败：Node.js 堆溢出 (heap=${_NODE_HEAP}MB, mem=${_MEM_TOTAL_GB}GB)
-      建议: 增加内存至 12GB+ 或手动添加 swap (dd + mkswap + swapon)"
+            err "前端资源编译失败：内存溢出 (heap=${_NODE_HEAP}MB, workers=${_WEBPACK_PARALLEL}, virt=${_VIRT_GB:-?}GB)
+          建议: 增加内存/swap 至 16GB+ 或 NODE_HEAP_MB=2048 WEBPACK_PARALLEL=1 bash install_gitlab_source.sh"
         else
             warn "  日志: ${_WEBPACK_LOG}"
             err "前端资源编译失败，详见 ${_WEBPACK_LOG}"
         fi
     fi
 fi
-
 # 编译完成后恢复之前暂停的服务
 if ${_tmp_services_stopped:-false}; then
     info "  编译完成，恢复 Puma / Sidekiq / Workhorse..."
@@ -524,6 +621,26 @@ if [ -d "${SYSTEMD_SRC}" ]; then
     done
     systemctl daemon-reload
     info "  ✓ 已部署 ${SERVICE_COUNT} 个 systemd 单元"
+
+    # ── 修正 Workhorse 配置（GitLab 19.x 兼容性）──
+    # 1. authBackend 端口必须与 Puma 一致（puma.rb 默认 3000）
+    # 2. authSocket 若 Puma 未创建 Unix socket 则必须移除，否则 Workhorse 优先 socket 导致 502
+    _WH_SVC="${UNIT_DIR}/gitlab-workhorse.service"
+    if [ -f "${_WH_SVC}" ]; then
+        if grep -q 'authBackend.*8080' "${_WH_SVC}" 2>/dev/null; then
+            sed -i 's|-authBackend http://127.0.0.1:8080|-authBackend http://127.0.0.1:3000|' "${_WH_SVC}"
+            info "  ✓ Workhorse authBackend: 8080 → 3000"
+        fi
+        # 移除不存在的 authSocket，只保留 TCP
+        if grep -q '\-authSocket' "${_WH_SVC}" 2>/dev/null; then
+            _PUMA_SOCKET="${GITLAB_DIR}/tmp/sockets/gitlab.socket"
+            if [ ! -S "${_PUMA_SOCKET}" ]; then
+                sed -i 's|-authSocket [^ ]* ||' "${_WH_SVC}"
+                info "  ✓ Workhorse authSocket 已移除（Puma 未创建 Unix socket）"
+            fi
+        fi
+        systemctl daemon-reload
+    fi
 else
     warn "  lib/support/systemd 目录不存在，创建最小化服务文件..."
 
@@ -592,19 +709,26 @@ LimitNOFILE=65536
 WantedBy=multi-user.target
 SIDEKIQUNIT
 
-    # Workhorse
+    # Workhorse（Unix socket + Puma TCP 3000）
     cat > "${UNIT_DIR}/gitlab-workhorse.service" << WORKHORSEUNIT
 [Unit]
 Description=GitLab Workhorse
-After=network.target
+After=network.target gitlab-puma.service
+Wants=gitlab-puma.service
 
 [Service]
 Type=simple
 User=git
 Group=git
-WorkingDirectory=${WORKHORSE_DIR}
+WorkingDirectory=${GITLAB_DIR}
 Environment="HOME=${GITLAB_HOME}"
-ExecStart=${WORKHORSE_DIR}/gitlab-workhorse -listenAddr 127.0.0.1:8181 -secretPath ${GITLAB_DIR}/.gitlab_workhorse_secret
+ExecStart=${WORKHORSE_DIR}/gitlab-workhorse \\
+    -listenUmask 0 \\
+    -listenNetwork unix \\
+    -listenAddr ${GITLAB_DIR}/tmp/sockets/gitlab-workhorse.socket \\
+    -authBackend http://127.0.0.1:3000 \\
+    -documentRoot ${GITLAB_DIR}/public \\
+    -secretPath ${GITLAB_DIR}/.gitlab_workhorse_secret
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
@@ -672,9 +796,145 @@ done
 info "  ✓ 服务启动完成"
 
 # ═══════════════════════════════════════════════
-# 6. 等待就绪
+# 6. Nginx 反向代理
 # ═══════════════════════════════════════════════
-step "[6/7] 等待 GitLab 就绪..."
+step "[6/8] Nginx 反向代理..."
+
+NGINX_SCRIPT="${_SCRIPT_DIR}/../../nginx/install_nginx.sh"
+NGINX_CONF_DIR="/usr/local/nginx/conf/conf.d"
+NGINX_GITLAB_CONF="${NGINX_CONF_DIR}/gitlab.conf"
+
+# 安装 Nginx（如果未安装）
+if [ -x /usr/local/nginx/sbin/nginx ] || [ -x /usr/sbin/nginx ]; then
+    info "  ✓ Nginx 已安装"
+else
+    info "  调用 Nginx 安装脚本..."
+    if [ -f "${NGINX_SCRIPT}" ]; then
+        bash "${NGINX_SCRIPT}" --port "${GITLAB_PORT}" || warn "Nginx 安装有警告，继续配置..."
+    else
+        warn "  Nginx 安装脚本不存在: ${NGINX_SCRIPT}"
+        info "  尝试 dnf 在线安装 nginx..."
+        dnf install -y nginx 2>/dev/null || true
+    fi
+fi
+
+# 定位 nginx 二进制和配置目录（兼容 RPM 和 rpm2cpio 安装方式）
+if [ -x /usr/local/nginx/sbin/nginx ]; then
+    _NGINX_BIN=/usr/local/nginx/sbin/nginx
+    NGINX_CONF_MAIN=/usr/local/nginx/conf/nginx.conf
+    NGINX_CONF_DIR=/usr/local/nginx/conf/conf.d
+elif [ -x /usr/sbin/nginx ]; then
+    _NGINX_BIN=/usr/sbin/nginx
+    NGINX_CONF_MAIN=/etc/nginx/nginx.conf
+    NGINX_CONF_DIR=/etc/nginx/conf.d
+else
+    _NGINX_BIN=""
+fi
+
+if [ -n "${_NGINX_BIN}" ]; then
+    mkdir -p "${NGINX_CONF_DIR}"
+    NGINX_GITLAB_CONF="${NGINX_CONF_DIR}/gitlab.conf"
+
+    # ── 部署 GitLab 反代配置 ──
+    # 优先使用 Nginx 安装时从 pkg_deploy/nginx/conf.d/ 拷贝的模板
+    # （install_nginx.sh 已将模板 *.conf 拷贝到 conf.d 并替换 {{NGINX_PORT}}）
+    # 此处补全 GitLab 专用变量: {{GITLAB_DIR}}, {{GITLAB_DOMAIN}}
+    _TEMPLATE_SRC="${_SCRIPT_DIR}/../../nginx/conf.d/gitlab.conf"
+
+    if [ -f "${NGINX_GITLAB_CONF}" ] && grep -q '{{GITLAB_DIR}}' "${NGINX_GITLAB_CONF}" 2>/dev/null; then
+        info "  使用模板: ${NGINX_GITLAB_CONF}（由 install_nginx.sh 部署）"
+    elif [ -f "${_TEMPLATE_SRC}" ]; then
+        info "  使用模板: ${_TEMPLATE_SRC}"
+        cp "${_TEMPLATE_SRC}" "${NGINX_GITLAB_CONF}"
+    else
+        warn "  gitlab.conf 模板不存在，生成最小化配置..."
+        cat > "${NGINX_GITLAB_CONF}" << 'FALLBACKEOF'
+# GitLab CE 反向代理（最小化 fallback — 请替换为 pkg_deploy/nginx/conf.d/gitlab.conf 模板）
+upstream gitlab-workhorse {
+    server unix:{{GITLAB_DIR}}/tmp/sockets/gitlab-workhorse.socket fail_timeout=0;
+}
+server {
+    listen {{GITLAB_PORT}};
+    server_name {{GITLAB_DOMAIN}};
+    root {{GITLAB_DIR}}/public;
+    location /assets/ {
+        gzip_static on;
+        expires max;
+        add_header Cache-Control public;
+    }
+    location /uploads/ {
+        expires max;
+    }
+    location / {
+        client_max_body_size 0;
+        proxy_read_timeout 300;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://gitlab-workhorse;
+    }
+}
+FALLBACKEOF
+    fi
+
+    # 替换 GitLab 专用占位符
+    sed -i "s|{{GITLAB_DIR}}|${GITLAB_DIR}|g"   "${NGINX_GITLAB_CONF}"
+    sed -i "s|{{GITLAB_DOMAIN}}|${GITLAB_DOMAIN}|g" "${NGINX_GITLAB_CONF}"
+    sed -i "s|{{GITLAB_PORT}}|${GITLAB_PORT}|g"   "${NGINX_GITLAB_CONF}"
+
+    # 检查是否还有未替换的占位符
+    if grep -q '{{[A-Z_]\+}}' "${NGINX_GITLAB_CONF}" 2>/dev/null; then
+        warn "  ⚠ gitlab.conf 存在未替换的占位符:"
+        grep -n '{{[A-Z_]\+}}' "${NGINX_GITLAB_CONF}" 2>/dev/null || true
+    fi
+
+    # 在 Nginx 主配置中 include conf.d/*.conf（如果还没 include）
+    if [ -f "${NGINX_CONF_MAIN}" ] && ! grep -q "conf\.d/\*\.conf" "${NGINX_CONF_MAIN}" 2>/dev/null; then
+        if grep -q '^http {' "${NGINX_CONF_MAIN}" 2>/dev/null; then
+            sed -i '/^http {/a\    include '"${NGINX_CONF_DIR}"'/*.conf;' "${NGINX_CONF_MAIN}"
+        fi
+    fi
+
+    info "  ✓ gitlab.conf → ${NGINX_GITLAB_CONF}"
+
+    # 语法检查 + 启动/重载
+    if ${_NGINX_BIN} -t 2>&1; then
+        if systemctl is-active nginx &>/dev/null; then
+            systemctl reload nginx 2>/dev/null || systemctl restart nginx
+        else
+            systemctl enable nginx 2>/dev/null || true
+            systemctl start nginx
+        fi
+        sleep 2
+        if systemctl is-active nginx &>/dev/null; then
+            info "  ✓ Nginx 已启动，端口 ${GITLAB_PORT}"
+
+            # ── 修正 Nginx 权限（访问 git 用户目录下的 Unix socket）──
+            # nginx 用户需要遍历 /home/git/ → gitlab/tmp/sockets/ 目录链
+            # 将 nginx 加入 git 组 + 开放目录组执行权限
+            if ! id nginx 2>/dev/null | grep -q 'git'; then
+                usermod -a -G git nginx 2>/dev/null || true
+            fi
+            chmod g+x /home/git 2>/dev/null || true
+            systemctl restart nginx 2>/dev/null || true
+            info "  ✓ Nginx 权限已修正（git 组 + 目录遍历）"
+        else
+            warn "  ✗ Nginx 启动失败，检查: journalctl -u nginx -n 20"
+        fi
+    else
+        warn "  ✗ Nginx 配置语法检查未通过，检查: ${_NGINX_BIN} -t"
+    fi
+else
+    warn "  ✗ 未找到 nginx 二进制，跳过反向代理"
+    info "  GitLab Puma 监听 127.0.0.1:3000，Workhorse socket: ${GITLAB_DIR}/tmp/sockets/gitlab-workhorse.socket"
+fi
+
+# ═══════════════════════════════════════════════
+# 7. 等待就绪
+# ═══════════════════════════════════════════════
+step "[7/8] 等待 GitLab 就绪..."
 
 GITLAB_URL="http://127.0.0.1:${GITLAB_PORT}"
 READY=false
@@ -699,7 +959,7 @@ done
 # ═══════════════════════════════════════════════
 # 7. 验证
 # ═══════════════════════════════════════════════
-step "[7/7] 验证..."
+step "[8/8] 验证..."
 
 # 服务状态
 echo ""

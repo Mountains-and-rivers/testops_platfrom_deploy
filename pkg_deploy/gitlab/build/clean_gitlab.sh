@@ -9,6 +9,7 @@ set -euo pipefail
 MODE="${1:-omnibus}"
 REMOVE_DATA=false
 GITLAB_HOME="${GITLAB_HOME:-/home/git}"
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '/tmp')"
 
 [ "${2:-}" = "--data" ] && REMOVE_DATA=true
 
@@ -62,7 +63,7 @@ case "${MODE}" in
 
     source)
         # ── 源码编译 ──
-        step "[1/6] 停止 systemd 服务..."
+        step "[1/7] 停止 systemd 服务..."
         for svc in gitlab-puma gitlab-sidekiq gitlab-workhorse gitlab-gitaly; do
             systemctl stop "${svc}" 2>/dev/null && info "  ${svc} 已停止" || true
             systemctl disable "${svc}" 2>/dev/null || true
@@ -72,7 +73,38 @@ case "${MODE}" in
         systemctl daemon-reload 2>/dev/null || true
         info "  systemd 单元已移除"
 
-        step "[2/6] 删除 GitLab 源码 & 编译产物..."
+        step "[2/7] 清理 Nginx..."
+        # 删除 GitLab 反代配置
+        rm -f /usr/local/nginx/conf/conf.d/gitlab.conf 2>/dev/null || true
+        rm -f /etc/nginx/conf.d/gitlab.conf 2>/dev/null || true
+
+        # 如果 Nginx 是 GitLab 安装脚本自动安装的（无其他站点配置），则完全卸载
+        _NGINX_REMAIN_CONF=0
+        for _d in /usr/local/nginx/conf/conf.d /etc/nginx/conf.d; do
+            [ -d "${_d}" ] && _NGINX_REMAIN_CONF=$((_NGINX_REMAIN_CONF + $(ls "${_d}"/*.conf 2>/dev/null | wc -l)))
+        done
+        if [ "${_NGINX_REMAIN_CONF}" -eq 0 ] || ${REMOVE_DATA}; then
+            # 无其他站点或指定 --data：完全卸载 Nginx
+            _NGINX_UNINSTALL="${_SCRIPT_DIR}/../../nginx/uninstall_nginx.sh"
+            if [ -f "${_NGINX_UNINSTALL}" ]; then
+                bash "${_NGINX_UNINSTALL}" --data 2>/dev/null && info "  ✓ Nginx 已完全卸载" || true
+            else
+                systemctl stop nginx 2>/dev/null || true
+                systemctl disable nginx 2>/dev/null || true
+                rm -f /etc/systemd/system/nginx.service
+                rm -rf /usr/local/nginx 2>/dev/null || true
+                userdel -r nginx 2>/dev/null || true
+                rm -rf /var/log/nginx /var/cache/nginx 2>/dev/null || true
+                systemctl daemon-reload 2>/dev/null || true
+                info "  ✓ Nginx 已清理（手动）"
+            fi
+        else
+            # 有其他站点使用 Nginx：仅重载，保留 Nginx
+            systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+            info "  ✓ GitLab 反代配置已移除，Nginx 保留（${_NGINX_REMAIN_CONF} 个其他站点）"
+        fi
+
+        step "[3/7] 删除 GitLab 源码 & 编译产物..."
         rm -rf \
             "${GITLAB_HOME}/gitlab" \
             "${GITLAB_HOME}/gitaly" \
@@ -83,14 +115,14 @@ case "${MODE}" in
             2>/dev/null || true
         info "  gitlab / gitaly / gitlab-shell / workhorse / pages / repositories"
 
-        step "[3/6] 删除语言运行时（Ruby / Go / Node）..."
+        step "[4/7] 删除语言运行时（Ruby / Go / Node）..."
         rm -rf /usr/local/ruby /usr/local/go 2>/dev/null || true
         # Node.js 散落在 /usr/local/{bin,lib,include,share}，仅清理由本脚本安装的
         rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/yarn /usr/local/bin/npx 2>/dev/null || true
         rm -rf /usr/local/lib/node_modules 2>/dev/null || true
         info "  Ruby /usr/local/ruby  |  Go /usr/local/go  |  Node /usr/local/bin/{node,npm,yarn}"
 
-        step "[4/6] 清理目录 & 权限..."
+        step "[5/7] 清理目录 & 权限..."
         rm -rf \
             "${GITLAB_HOME}/.ssh" \
             /var/log/gitlab \
@@ -102,7 +134,7 @@ case "${MODE}" in
             2>/dev/null || true
         info "  .ssh / var/log/gitlab / /data/gitlab/*"
 
-        step "[5/6] 清理数据库 + 用户..."
+        step "[6/7] 清理数据库 + 用户..."
         if ${REMOVE_DATA}; then
             # 数据库
             su - postgres -c "psql -c \"DROP DATABASE IF EXISTS gitlabhq_production;\"" 2>/dev/null \
@@ -129,7 +161,7 @@ case "${MODE}" in
 esac
 
 # ── 公共清理 ──
-step "[6] 公共临时文件..."
+step "[7] 公共临时文件..."
 rm -rf \
     /opt/build/gitlab \
     /tmp/gitlab-* \
