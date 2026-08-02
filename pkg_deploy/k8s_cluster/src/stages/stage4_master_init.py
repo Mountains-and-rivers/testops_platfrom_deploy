@@ -463,7 +463,7 @@ def run_master_init(state: WorkflowStateManager) -> None:
                             import_ok = True
                             pulled_from_mirror = True
                             if candidate != image:
-                                ssh.exec_command(
+                                ssh.exec_command_ok(
                                     f"ctr -n k8s.io image tag {candidate} {image} && "
                                     f"ctr -n k8s.io image remove {candidate}",
                                     sudo=False, timeout=30
@@ -530,7 +530,7 @@ def run_master_init(state: WorkflowStateManager) -> None:
                     sudo=False, timeout=300
                 )
                 if ec == 0 and "PULL_FAILED" not in po:
-                    ssh.exec_command(
+                    ssh.exec_command_ok(
                         f"ctr -n k8s.io image tag {mirror_img} {calico_img} && "
                         f"ctr -n k8s.io image remove {mirror_img}",
                         sudo=False, timeout=30
