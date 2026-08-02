@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 
 # workflow 定义文件路径
 WORKFLOW_CONFIG_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "config"
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config"
 )
 
 

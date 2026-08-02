@@ -218,10 +218,11 @@ class SSHClient:
         last_error = None
         for attempt in range(1, max_retries + 1):
             try:
-                stdin, stdout, stderr = self._client.exec_command(
-                    command, timeout=timeout
-                )
-                exit_code = stdout.channel.recv_exit_status()
+                stdin, stdout, stderr = self._client.exec_command(command)
+                # 设置 channel 超时，确保 recv_exit_status / read 不会永久阻塞
+                channel = stdout.channel
+                channel.settimeout(timeout)
+                exit_code = channel.recv_exit_status()
                 stdout_str = stdout.read().decode("utf-8", errors="replace").strip()
                 stderr_str = stderr.read().decode("utf-8", errors="replace").strip()
 

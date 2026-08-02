@@ -21,15 +21,7 @@ from src.workflow.workflow_exception import CNIDeployError
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-
-# Calico manifest URL（国内优先 ghproxy）
-CALICO_URLS = [
-    "https://ghproxy.net/https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml",
-    "https://mirror.ghproxy.com/https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml",
-    "https://raw.githubusercontent.com/projectcalico/calico/v3.27.0/manifests/calico.yaml",
-]
-
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
 
 def run_cni_deploy(state: WorkflowStateManager) -> None:
     """部署 Calico CNI"""
@@ -37,16 +29,20 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
     logger.info("Stage 6: 开始 CNI 网络插件部署 (Calico)")
     logger.info("=" * 50)
 
+    state.require_stage_success("stage5_node_join")
+
     cluster_info = YAMLHelper.load(os.path.join(CONFIG_DIR, "cluster_info.yaml"))
     calico_cfg = cluster_info.get("cluster_info", {}).get("cni", {}).get("calico", {})
 
-    master_ip = state.get_global("master_ip")
-    if not master_ip:
-        raise CNIDeployError("calico", "未找到 Master 节点 IP")
-
     node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
     masters = node_list.get("node_list", {}).get("masters", [])
-    master_cfg = masters[0].get("ssh", {}) if masters else {}
+    if not masters:
+        raise CNIDeployError("calico", "node_list.yaml 中未找到 Master 节点")
+
+    master_ip = state.get_global("master_ip") or masters[0].get("ip")
+    if not master_ip:
+        raise CNIDeployError("calico", "未找到 Master 节点 IP")
+    master_cfg = masters[0].get("ssh", {})
 
     ssh = SSHClient(
         host=master_ip,
@@ -58,6 +54,16 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
 
     try:
         ssh.connect()
+
+        # 从配置读取 Calico 版本
+        calico_ver = calico_cfg.get("version", "v3.27.0")
+
+        # Calico manifest URL（国内优先 ghproxy）
+        CALICO_URLS = [
+            f"https://ghproxy.net/https://raw.githubusercontent.com/projectcalico/calico/{calico_ver}/manifests/calico.yaml",
+            f"https://mirror.ghproxy.com/https://raw.githubusercontent.com/projectcalico/calico/{calico_ver}/manifests/calico.yaml",
+            f"https://raw.githubusercontent.com/projectcalico/calico/{calico_ver}/manifests/calico.yaml",
+        ]
 
         # 1. 下载 manifest
         logger.info("下载 Calico manifest...")
@@ -84,9 +90,9 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
             ssh.exec_command_ok(f"sed -i 's|192.168.0.0/16|{pod_cidr}|g' /tmp/calico.yaml")
             logger.info(f"Pod 网段 → {pod_cidr}")
 
-        # 3. 替换镜像源为 quay.io（阿里云 quayio 加速，国内唯一可用）
+        # 3. 替换镜像源为 quay.io（containerd mirror 自动重定向到阿里云 quayio 加速）
         ssh.exec_command("sed -i 's|docker.io/calico/|quay.io/calico/|g' /tmp/calico.yaml", timeout=5)
-        logger.info("镜像源 → quay.io")
+        logger.info("镜像源 → quay.io (containerd mirror → registry.cn-hangzhou.aliyuncs.com/quayio)")
 
         # 4. 部署
         logger.info("部署 Calico...")
@@ -138,6 +144,10 @@ def rollback_cni_deploy(state: WorkflowStateManager) -> None:
     logger.info("=" * 50)
 
     master_ip = state.get_global("master_ip")
+    if not master_ip:
+        node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
+        masters = node_list.get("node_list", {}).get("masters", [])
+        master_ip = masters[0].get("ip") if masters else None
     if not master_ip:
         logger.warning("无 Master IP，跳过")
         return

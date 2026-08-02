@@ -24,7 +24,7 @@ from common.ssh_client import SSHClient
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "..", "reports", "backup_files")
 
 

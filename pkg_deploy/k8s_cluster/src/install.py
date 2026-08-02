@@ -19,24 +19,23 @@ from src.workflow.pipeline import K8sDeployPipeline
 logger = get_logger(__name__)
 
 
-def run_install(start_stage: int = 0, reset_state: bool = False):
+def run_install(start_stage: int = 0, reset_state: bool = True):
     """
     执行完整 K8s 集群部署流水线。
 
     Args:
-        start_stage: 起始阶段编号（0-based），支持断点续跑
-        reset_state: True=一键安装（重置状态），False=断点续跑
+        start_stage: 起始阶段编号（0-based），默认从头开始
+        reset_state: 保留参数，始终重置状态
     """
     pipeline = K8sDeployPipeline(workflow_type="install")
     pipeline.register_all_default_stages()
 
-    # 一键安装：删除旧状态文件，全新开始
-    if reset_state and start_stage == 0:
-        from src.constants import Paths
-        state_file = os.path.join(PROJECT_ROOT, Paths.STATE_FILE)
-        if os.path.exists(state_file):
-            os.remove(state_file)
-            logger.info("已重置部署状态，全新安装")
+    # 每次安装都删除旧状态文件，全新开始
+    from src.constants import Paths
+    state_file = os.path.join(PROJECT_ROOT, Paths.STATE_FILE)
+    if os.path.exists(state_file):
+        os.remove(state_file)
+        logger.info("已重置部署状态，全新安装")
 
     success = pipeline.run(start_stage=start_stage)
 

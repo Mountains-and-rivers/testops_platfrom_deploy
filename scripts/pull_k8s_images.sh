@@ -380,7 +380,7 @@ pull_calico_images() {
     done
     echo ""
     log_info "Calico done | output: ${CALICO_OUT}/"
-    echo "  scp root@<master>:${CALICO_OUT}/*.tar modules/k8s_cluster_deploy/images/calico/"
+    echo "  scp root@<master>:${CALICO_OUT}/*.tar pkg_deploy/k8s_cluster/images/calico/"
 }
 
 case "${1:-}" in

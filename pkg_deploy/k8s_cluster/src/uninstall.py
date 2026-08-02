@@ -21,7 +21,7 @@ from src.constants import Paths
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
 
 
 def _ssh_for_node(node: dict):
@@ -98,10 +98,11 @@ def run_uninstall():
         ssh = _ssh_for_node(node)
         try:
             ssh.connect()
-            # 卸载 kubelet/kubeadm/kubectl
+            # 卸载 kubelet/kubeadm/kubectl + 删仓库
             ssh.exec_command(
                 "yum remove -y kubeadm kubectl kubelet 2>/dev/null; "
-                "apt-get remove -y kubeadm kubectl kubelet 2>/dev/null || true",
+                "apt-get remove -y kubeadm kubectl kubelet 2>/dev/null || true; "
+                "rm -f /etc/yum.repos.d/kubernetes.repo 2>/dev/null || true",
                 sudo=False, timeout=120
             )
             # 停止 containerd

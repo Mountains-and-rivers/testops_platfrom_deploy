@@ -27,13 +27,15 @@ TEST_NAMESPACE = "testops-verify"
 
 
 def _get_ssh(state):
-    """获取 Master SSH 客户端"""
-    master_ip = state.get_global("master_ip")
-    if not master_ip:
-        raise ClusterVerifyError("master_ip", "Master 节点 IP 未找到")
-    CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    """获取 Master SSH 客户端（state 无 master_ip 时自动从配置读取）"""
+    CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
     node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
     masters = node_list.get("node_list", {}).get("masters", [])
+    if not masters:
+        raise ClusterVerifyError("master_ip", "node_list.yaml 中未找到 Master 节点")
+    master_ip = state.get_global("master_ip") or masters[0].get("ip")
+    if not master_ip:
+        raise ClusterVerifyError("master_ip", "Master 节点 IP 未找到")
     master_cfg = masters[0].get("ssh", {}) if masters else {}
     ssh = SSHClient(
         host=master_ip,
@@ -48,6 +50,8 @@ def _get_ssh(state):
 
 def run_cluster_verify(state: WorkflowStateManager) -> None:
     """执行集群部署后全面健康校验"""
+    state.require_stage_success("stage6_cni_deploy")
+
     logger.info("=" * 50)
     logger.info("Stage 7: 集群健康校验")
     logger.info("=" * 50)
@@ -245,7 +249,7 @@ def rollback_cluster_verify(state: WorkflowStateManager) -> None:
         logger.warning("无 Master IP，跳过")
         return
 
-    CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
     node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
     masters = node_list.get("node_list", {}).get("masters", [])
     master_cfg = masters[0].get("ssh", {}) if masters else {}

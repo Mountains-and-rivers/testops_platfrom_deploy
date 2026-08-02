@@ -49,7 +49,7 @@ class RemoteExecutor:
         if node_list_path is None:
             node_list_path = os.path.join(
                 PROJECT_ROOT,
-                "modules/k8s_cluster_deploy/config/node_list.yaml"
+                "pkg_deploy/k8s_cluster/config/node_list.yaml"
             )
         self._node_list_path = node_list_path
         self._node_list: Dict = {}

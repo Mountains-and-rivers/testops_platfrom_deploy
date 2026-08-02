@@ -28,7 +28,7 @@ from src.workflow.workflow_exception import MasterInitError
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
 # MODULE_DIR = pkg_deploy/k8s_cluster/  (从 src/stages/ 回退三层)
 MODULE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 TEMP_CACHE_DIR = os.path.join(MODULE_DIR, "runtime", "temp_cache")
@@ -55,10 +55,10 @@ def _cleanup_partial_init(ssh: SSHClient, hostname: str) -> bool:
     """检测并清理 kubeadm init 半残状态（如 PKI 不完整、admin.conf 缺失、API Server 宕机）。
     返回 True 表示已执行清理，需重新 init。
     """
-    admin_ok, _ = ssh.exec_command("test -f /etc/kubernetes/admin.conf && echo YES || echo NO", timeout=5)
-    pki_ok, _ = ssh.exec_command("test -d /etc/kubernetes/pki -a -f /etc/kubernetes/pki/ca.crt && echo YES || echo NO", timeout=5)
-    etcd_ok, _ = ssh.exec_command("test -d /var/lib/etcd/member && echo YES || echo NO", timeout=5)
-    apiserver_ok, _ = ssh.exec_command(
+    _, admin_ok, _ = ssh.exec_command("test -f /etc/kubernetes/admin.conf && echo YES || echo NO", timeout=5)
+    _, pki_ok, _ = ssh.exec_command("test -d /etc/kubernetes/pki -a -f /etc/kubernetes/pki/ca.crt && echo YES || echo NO", timeout=5)
+    _, etcd_ok, _ = ssh.exec_command("test -d /var/lib/etcd/member && echo YES || echo NO", timeout=5)
+    _, apiserver_ok, _ = ssh.exec_command(
         "kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw /healthz 2>/dev/null | grep -q ok && echo YES || echo NO",
         timeout=5
     )
@@ -371,6 +371,32 @@ def run_master_init(state: WorkflowStateManager) -> None:
             sudo=False
         )
         images = [l.strip() for l in img_list.split("\n") if l.strip()]
+        # 确保 containerd 实际使用的 sandbox 镜像版本在预拉列表中
+        # stage2 和 kubeadm init 都会写 containerd 配置，格式不同但版本号一致
+        _, sandbox_ver, _ = ssh.exec_command(
+            "grep -oE 'registry\\.k8s\\.io/pause:[0-9.]+' "
+            "/etc/containerd/config.toml 2>/dev/null | head -1 || true",
+            timeout=5
+        )
+        sandbox_ver = sandbox_ver.strip()
+        if sandbox_ver and sandbox_ver not in images:
+            images.append(sandbox_ver)
+            logger.info(f"[{hostname}]   追加 containerd sandbox 镜像: {sandbox_ver}")
+        # 防御：kubeadm 列表的 pause 版本可能比 containerd 实际配置低一个 patch 号
+        # 例如 kubeadm 列 pause:3.10，但 containerd 实际用 pause:3.10.1
+        for img in list(images):
+            if '/pause:' in img:
+                parts = img.split(':')
+                ver_parts = parts[1].split('.')
+                if len(ver_parts) == 3:
+                    try:
+                        ver_parts[2] = str(int(ver_parts[2]) + 1)
+                        bumped = f"{parts[0]}:{'.'.join(ver_parts)}"
+                        if bumped not in images:
+                            images.append(bumped)
+                            logger.info(f"[{hostname}]   追加 pause patch+1 镜像: {bumped}")
+                    except ValueError:
+                        pass
         logger.info(f"[{hostname}]   共 {len(images)} 个镜像")
 
         os.makedirs(IMAGES_DIR, exist_ok=True)
@@ -409,39 +435,7 @@ def run_master_init(state: WorkflowStateManager) -> None:
                         pass
                 continue
 
-            # ---- 远程直拉（国内镜像 → re-tag 官方） ----
-            logger.info(f"[{hostname}]   [{i}/{len(images)}] 🌐 拉取 {img_name}...")
-            pulled_from_mirror = False
-            for mirror in MIRROR_CANDIDATES:
-                # 构造候选 URL: 标准替换 + 扁平化（针对 coredns/coredns）
-                tag = image.split(":")[-1]
-                flat_name = image.split("/")[-1].split(":")[0]
-                candidates = [image.replace("registry.k8s.io", mirror)]
-                if "/" in image.replace("registry.k8s.io/", "").split(":")[0]:
-                    candidates.append(f"{mirror}/{flat_name}:{tag}")
-                # 去重
-                candidates = list(dict.fromkeys(candidates))
-
-                for candidate in candidates:
-                    exit_code, pull_out, _ = ssh.exec_command(
-                        f"ctr -n k8s.io image pull {candidate} 2>&1 || echo PULL_FAILED",
-                        sudo=False, timeout=180
-                    )
-                    if exit_code == 0 and "PULL_FAILED" not in pull_out:
-                        import_ok = True
-                        pulled_from_mirror = True
-                        if candidate != image:
-                            ssh.exec_command(
-                                f"ctr -n k8s.io image tag {candidate} {image} && "
-                                f"ctr -n k8s.io image remove {candidate}",
-                                sudo=False, timeout=30
-                            )
-                        logger.info(f"[{hostname}]   ✅ {img_name} 远程拉取完成 (via {mirror.split('/')[0]})")
-                        break
-                if pulled_from_mirror:
-                    break
-
-            # ---- 兜底: 本地 tar 上传导入 ----
+            # ---- 策略 A: 本地 tar 上传导入（优先，无网络依赖） ----
             if not import_ok and os.path.exists(local_tar):
                 logger.info(f"[{hostname}]   [{i}/{len(images)}] 📦 本地上传 {img_name}...")
                 ssh.upload_file(local_tar, f"/tmp/k8s-images/{img_name}.tar")
@@ -457,6 +451,39 @@ def run_master_init(state: WorkflowStateManager) -> None:
                     if check.strip() != "0":
                         import_ok = True
                         logger.info(f"[{hostname}]   ✅ {img_name} 本地加载完成")
+
+            # ---- 策略 B: 远程直拉（国内镜像 → re-tag 官方） ----
+            if not import_ok:
+                logger.info(f"[{hostname}]   [{i}/{len(images)}] 🌐 拉取 {img_name}...")
+                pulled_from_mirror = False
+                for mirror in MIRROR_CANDIDATES:
+                    # 构造候选 URL: 标准替换 + 扁平化（针对 coredns/coredns）
+                    tag = image.split(":")[-1]
+                    flat_name = image.split("/")[-1].split(":")[0]
+                    candidates = [image.replace("registry.k8s.io", mirror)]
+                    if "/" in image.replace("registry.k8s.io/", "").split(":")[0]:
+                        candidates.append(f"{mirror}/{flat_name}:{tag}")
+                    # 去重
+                    candidates = list(dict.fromkeys(candidates))
+
+                    for candidate in candidates:
+                        exit_code, pull_out, _ = ssh.exec_command(
+                            f"ctr -n k8s.io image pull {candidate} 2>&1 || echo PULL_FAILED",
+                            sudo=False, timeout=180
+                        )
+                        if exit_code == 0 and "PULL_FAILED" not in pull_out:
+                            import_ok = True
+                            pulled_from_mirror = True
+                            if candidate != image:
+                                ssh.exec_command(
+                                    f"ctr -n k8s.io image tag {candidate} {image} && "
+                                    f"ctr -n k8s.io image remove {candidate}",
+                                    sudo=False, timeout=30
+                                )
+                            logger.info(f"[{hostname}]   ✅ {img_name} 远程拉取完成 (via {mirror.split('/')[0]})")
+                            break
+                    if pulled_from_mirror:
+                        break
 
             # ---- 缓存回写 ----
             if import_ok and not os.path.exists(local_tar):
@@ -475,38 +502,210 @@ def run_master_init(state: WorkflowStateManager) -> None:
 
         ssh.exec_command("rm -rf /tmp/k8s-images", sudo=False)
 
-        # 3. kubeadm init（timeout 600s 防卡死）
-        logger.info(f"[{hostname}] 🚀 执行 kubeadm init...")
-        logger.info(f"[{hostname}]   (约 2-5 分钟，耐心等待)")
-        # kubeadm init（低配机 API Server 启动慢，超时 4 分钟）
-        exit_code, stdout, stderr = ssh.exec_command(
-            "kubeadm init --config=/tmp/kubeadm-init.yaml --upload-certs 2>&1",
-            sudo=False, timeout=300,
-        )
-        for line in (stdout + stderr).split("\n"):
-            line = line.strip()
-            if not line: continue
-            if any(kw in line.lower() for kw in ["error", "fail", "fatal"]):
-                logger.error(f"[{hostname}]   │ {line[:150]}")
-            elif any(kw in line.lower() for kw in ["warn"]):
-                logger.warning(f"[{hostname}]   │ {line[:150]}")
-            else:
-                logger.info(f"[{hostname}]   │ {line[:150]}")
-
-        err_text = (stderr + stdout)
-        if exit_code != 0 and ("wait-control-plane" in err_text or "context deadline" in err_text):
-            # API Server 已由 kubelet 启动，只是超时了没等到
-            # 轮询检测 healthz，最多再等 5 分钟
-            logger.warning(f"[{hostname}] 控制平面启动较慢，等待 API Server ready...")
-            for attempt in range(30):
-                time.sleep(10)
-                _, health, _ = ssh.exec_command(
-                    "kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw /healthz 2>/dev/null || echo WAITING",
-                    timeout=10
+        # 2.4 预拉取 Calico CNI 镜像（避免 stage6 部署时去 quay.io 直拉超时）
+        #     containerd mirror 自动重定向 quay.io → DaoCloud 加速
+        calico_ver = cluster_info.get("cluster_info", {}).get("cni", {}).get("calico", {}).get("version", "v3.27.0")
+        calico_images = [
+            f"quay.io/calico/cni:{calico_ver}",
+            f"quay.io/calico/node:{calico_ver}",
+            f"quay.io/calico/kube-controllers:{calico_ver}",
+        ]
+        # quay.io 镜像使用 DaoCloud 加速（阿里云 quayio 路径不可用）
+        # DaoCloud 路径: docker.m.daocloud.io/calico/<image>:<tag>
+        QUAY_MIRROR = "docker.m.daocloud.io"
+        logger.info(f"[{hostname}] 📥 预拉取 Calico 镜像 ({calico_ver})...")
+        for ci, calico_img in enumerate(calico_images, 1):
+            img_name = calico_img.split("/")[-1].replace(":", "_")
+            local_tar = os.path.join(IMAGES_DIR, f"{img_name}.tar")
+            # 检查 containerd 是否已有
+            if calico_img in existing_images:
+                logger.info(f"[{hostname}]   [{ci}/{len(calico_images)}] ✅ {img_name} 已存在")
+                continue
+            # 本地 tar 优先
+            pulled = False
+            if os.path.exists(local_tar):
+                logger.info(f"[{hostname}]   [{ci}/{len(calico_images)}] 📦 本地上传 {img_name}...")
+                ssh.upload_file(local_tar, f"/tmp/k8s-images/{img_name}.tar")
+                ec, _, _ = ssh.exec_command(
+                    f"ctr -n k8s.io image import /tmp/k8s-images/{img_name}.tar 2>&1",
+                    sudo=False, timeout=120
                 )
-                if "ok" in health:
-                    logger.info(f"[{hostname}] ✅ API Server ready（等待 {(attempt+1)*10}s）")
-                    exit_code = 0  # 标记成功
+                if ec == 0:
+                    pulled = True
+                    logger.info(f"[{hostname}]   ✅ {img_name} 本地加载完成")
+            # 从 DaoCloud 镜像拉取
+            if not pulled:
+                mirror_img = calico_img.replace("quay.io", QUAY_MIRROR)
+                logger.info(f"[{hostname}]   [{ci}/{len(calico_images)}] 🌐 拉取 {img_name}...")
+                ec, po, _ = ssh.exec_command(
+                    f"ctr -n k8s.io image pull {mirror_img} 2>&1 || echo PULL_FAILED",
+                    sudo=False, timeout=300
+                )
+                if ec == 0 and "PULL_FAILED" not in po:
+                    ssh.exec_command(
+                        f"ctr -n k8s.io image tag {mirror_img} {calico_img} && "
+                        f"ctr -n k8s.io image remove {mirror_img}",
+                        sudo=False, timeout=30
+                    )
+                    pulled = True
+                    logger.info(f"[{hostname}]   ✅ {img_name} 远程拉取完成")
+            if not pulled:
+                logger.warning(f"[{hostname}]   ⚠️ {img_name} 预拉取失败，依赖 stage6 兜底")
+        # 清理临时文件
+        ssh.exec_command("rm -f /tmp/k8s-images/node_*.tar /tmp/k8s-images/cni_*.tar /tmp/k8s-images/kube-controllers_*.tar", sudo=False)
+        _, existing_raw2, _ = ssh.exec_command(
+            "ctr -n k8s.io image ls -q 2>/dev/null || true",
+            sudo=False, timeout=10
+        )
+        existing_images = set(l.strip() for l in existing_raw2.split("\n") if l.strip())
+
+        # 2.5 沙箱镜像保护：无论预拉取结果如何，确保 containerd sandbox 镜像存在
+        #     kubeadm init 会改写 containerd 配置中的 sandbox_image 版本，
+        #     如果该镜像不在 containerd 中，kubelet 会直接去 Google 拉 → 国内超时
+        _, sandbox_needed, _ = ssh.exec_command(
+            "grep -oE 'registry\\.k8s\\.io/pause:[0-9.]+' "
+            "/etc/containerd/config.toml 2>/dev/null | head -1 || true",
+            timeout=5
+        )
+        sandbox_needed = sandbox_needed.strip()
+        if sandbox_needed:
+            _, has_sandbox, _ = ssh.exec_command(
+                f"ctr -n k8s.io image ls -q 2>/dev/null | grep -cF '{sandbox_needed}' || echo 0",
+                timeout=5
+            )
+            if has_sandbox.strip() == "0":
+                sandbox_tar_name = sandbox_needed.split("/")[-1].replace(":", "_") + ".tar"
+                sandbox_local = os.path.join(IMAGES_DIR, sandbox_tar_name)
+                if os.path.exists(sandbox_local):
+                    logger.info(f"[{hostname}] 🔧 强制导入 sandbox 镜像: {sandbox_tar_name}")
+                    ssh.upload_file(sandbox_local, f"/tmp/{sandbox_tar_name}")
+                    ssh.exec_command(
+                        f"ctr -n k8s.io image import /tmp/{sandbox_tar_name} 2>&1 || true",
+                        sudo=False, timeout=30
+                    )
+                    ssh.exec_command(f"rm -f /tmp/{sandbox_tar_name}")
+                else:
+                    logger.warning(f"[{hostname}] ⚠️ sandbox 镜像 {sandbox_needed} 不在 containerd 中，"
+                                   f"且本地 {sandbox_tar_name} 不存在，将尝试远程拉取")
+                    # 最后兜底：从阿里云拉取
+                    ver = sandbox_needed.split(":")[-1]
+                    ssh.exec_command(
+                        f"ctr -n k8s.io image pull registry.cn-hangzhou.aliyuncs.com/google_containers/pause:{ver} 2>&1 && "
+                        f"ctr -n k8s.io image tag registry.cn-hangzhou.aliyuncs.com/google_containers/pause:{ver} {sandbox_needed} 2>&1 && "
+                        f"ctr -n k8s.io image remove registry.cn-hangzhou.aliyuncs.com/google_containers/pause:{ver} 2>&1 || true",
+                        sudo=False, timeout=60
+                    )
+
+        # 2.6 预检：确认 kubelet 能启动并与 containerd 通信
+        #    如果 kubelet 无法启动（内核模块缺失/cgroup 不匹配/socket 不通），
+        #    立即失败并给出明确诊断，而非等待 kubeadm init 超时 15 分钟
+        #    注意: "activating" 是正常状态，表示 kubelet 已启动只是在等 API Server
+        logger.info(f"[{hostname}] 🔍 预检 kubelet 启动能力...")
+        ssh.exec_command("systemctl start kubelet 2>&1 || true", sudo=False, timeout=30)
+        time.sleep(5)
+        # 注意：systemctl is-active 对 "activating" 返回非零退出码，
+        # 但不能用 || echo FALLBACK 否则会污染输出导致字符串匹配失败
+        _, kubelet_status, _ = ssh.exec_command(
+            "systemctl is-active kubelet 2>/dev/null; true",
+            timeout=5
+        )
+        kubelet_status = kubelet_status.strip()
+        logger.info(f"[{hostname}]   kubelet 启动测试: {kubelet_status}")
+
+        # kubelet 启动后可能处于 active 或 activating（等待 API Server，正常）
+        is_kubelet_ok = "active" in kubelet_status or "activating" in kubelet_status
+        if not is_kubelet_ok:
+            # 收集诊断信息
+            _, kubelet_log, _ = ssh.exec_command(
+                "journalctl -u kubelet --no-pager -n 30 2>/dev/null || echo NO_LOG",
+                timeout=10
+            )
+            _, cri_check, _ = ssh.exec_command(
+                "crictl --runtime-endpoint=unix:///var/run/containerd/containerd.sock "
+                "info 2>&1 | head -5 || echo CRI_FAILED",
+                timeout=10
+            )
+            # 额外检查内核模块
+            _, mod_br, _ = ssh.exec_command(
+                "lsmod | grep -E '^br_netfilter|^overlay|^ip_vs' | awk '{print $1}' | tr '\\n' ' ' || echo NONE",
+                timeout=5
+            )
+            ssh.exec_command("systemctl stop kubelet 2>/dev/null || true", timeout=10)
+            raise MasterInitError(
+                hostname,
+                f"kubelet 预检失败: 服务状态为 '{kubelet_status}'。"
+                f"已加载关键内核模块: [{mod_br.strip()}]. "
+                f"kubelet 日志: {kubelet_log[:300]}. "
+                f"CRI 状态: {cri_check[:200]}"
+            )
+
+        # 停止 kubelet——kubeadm init 会正确启动它
+        ssh.exec_command("systemctl stop kubelet 2>/dev/null || true", timeout=10)
+        logger.info(f"[{hostname}]   kubelet 预检通过 ✓")
+
+        # 3. kubeadm init（timeout 900s 覆盖 kubeadm 配置中 10m 健康检查超时）
+        logger.info(f"[{hostname}] 🚀 执行 kubeadm init...")
+        logger.info(f"[{hostname}]   (约 2-5 分钟，耐心等待，最长 15 分钟)")
+
+        kubeadm_succeeded = False
+        kubeadm_err_text = ""
+
+        try:
+            exit_code, stdout, stderr = ssh.exec_command(
+                "kubeadm init --config=/tmp/kubeadm-init.yaml --upload-certs 2>&1",
+                sudo=False, timeout=900,
+            )
+            for line in (stdout + stderr).split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                if any(kw in line.lower() for kw in ["error", "fail", "fatal"]):
+                    logger.error(f"[{hostname}]   │ {line[:150]}")
+                elif any(kw in line.lower() for kw in ["warn"]):
+                    logger.warning(f"[{hostname}]   │ {line[:150]}")
+                else:
+                    logger.info(f"[{hostname}]   │ {line[:150]}")
+
+            kubeadm_err_text = (stderr + stdout)
+            if exit_code == 0:
+                kubeadm_succeeded = True
+        except Exception as ssh_err:
+            # SSH 超时或连接异常时，kubeadm 可能仍在后台运行
+            kubeadm_err_text = str(ssh_err)
+            logger.warning(f"[{hostname}] kubeadm init SSH 连接异常: {kubeadm_err_text[:200]}")
+
+        # ---- 恢复路径：kubeadm 超时或报告 wait-control-plane ----
+        if not kubeadm_succeeded:
+            is_recoverable = (
+                "wait-control-plane" in kubeadm_err_text
+                or "context deadline" in kubeadm_err_text
+                or "timeout" in kubeadm_err_text.lower()
+                or "timed out" in kubeadm_err_text.lower()
+            )
+
+            # 检查 admin.conf 是否存在（恢复路径的前置条件）
+            _, admin_exists, _ = ssh.exec_command(
+                "test -f /etc/kubernetes/admin.conf && echo YES || echo NO",
+                timeout=5
+            )
+
+            if is_recoverable and "YES" in admin_exists:
+                # API Server 可能已由 kubelet 启动，只是 kubeadm 没等到
+                logger.warning(f"[{hostname}] 控制平面启动较慢，等待 API Server ready...")
+                api_ready = False
+                for attempt in range(30):
+                    time.sleep(10)
+                    _, health, _ = ssh.exec_command(
+                        "kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw /healthz 2>/dev/null || echo WAITING",
+                        timeout=10
+                    )
+                    if "ok" in health:
+                        logger.info(f"[{hostname}] ✅ API Server ready（等待 {(attempt+1)*10}s）")
+                        api_ready = True
+                        kubeadm_succeeded = True
+                        break
+
+                if api_ready:
                     # 修复 kubeconfig：将 DNS 主机名替换为 IP
                     ssh.exec_command(
                         f"grep -l 'k8s-api.testops.local' /etc/kubernetes/*.conf 2>/dev/null | "
@@ -523,13 +722,27 @@ def run_master_init(state: WorkflowStateManager) -> None:
                             logger.info(f"[{hostname}] 节点已注册且 Ready")
                             break
                         time.sleep(5)
-                    break
-            if exit_code != 0:
-                err_summary = err_text[-500:]
-                raise MasterInitError(hostname, f"kubeadm init 超时且 API Server 未 ready: {err_summary}")
-        elif exit_code != 0:
-            err_summary = err_text[-500:]
-            raise MasterInitError(hostname, f"kubeadm init 失败: {err_summary}")
+            elif is_recoverable and "NO" in admin_exists:
+                # kubeadm 未完成到创建 admin.conf → 不可恢复
+                err_summary = kubeadm_err_text[-500:]
+                raise MasterInitError(
+                    hostname,
+                    f"kubeadm init 超时且未生成 admin.conf（控制平面未启动，"
+                    f"请检查 kubelet/containerd/内核模块状态）: {err_summary}"
+                )
+            elif not is_recoverable:
+                err_summary = kubeadm_err_text[-500:]
+                raise MasterInitError(hostname, f"kubeadm init 失败: {err_summary}")
+
+            if not kubeadm_succeeded:
+                err_summary = kubeadm_err_text[-500:]
+                raise MasterInitError(
+                    hostname,
+                    f"API Server 在 5 分钟轮询内未就绪。"
+                    f"请执行 'journalctl -xeu kubelet' 和 "
+                    f"'crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock ps -a' 排查。"
+                    f"错误摘要: {err_summary}"
+                )
 
         # 4. 修复 kubeconfig（将 DNS 主机名替换为 IP）+ 配置 kubectl
         ssh.exec_command(

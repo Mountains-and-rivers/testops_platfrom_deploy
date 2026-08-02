@@ -5,11 +5,11 @@
 software_version:
   # ----- Kubernetes 版本 -----
   kubernetes:
-    default: "1.36.3"
+    default: "1.32.13"
     available:
-      - "1.35.8"
-      - "1.36.3"
-      - "1.37.0"
+      - "1.31.10"
+      - "1.32.13"
+      - "1.33.3"
     package_repo: "google"
 
   # ----- etcd 版本 -----
@@ -21,22 +21,20 @@ software_version:
 
   # ----- 容器运行时 -----
   containerd:
-    default: "1.7.29"
+    default: "2.2.6"
     available:
-      - "1.7.28"
-      - "1.7.29"
       - "2.2.6"
       - "2.3.3"
 
   # ----- 版本兼容性矩阵 -----
   compatibility:
-    kubernetes_1_35:
+    kubernetes_1_31:
       containerd: ">=1.7.0"
       calico: ">=3.28.0"
-    kubernetes_1_36:
+    kubernetes_1_32:
       containerd: ">=1.7.0"
       calico: ">=3.29.0"
-    kubernetes_1_37:
+    kubernetes_1_33:
       containerd: ">=1.7.0"
       calico: ">=3.29.0"
 

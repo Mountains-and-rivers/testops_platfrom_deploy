@@ -48,7 +48,7 @@ cluster_info:
   # 容器运行时
   container_runtime:
     engine: "containerd"
-    version: "1.7.13"
+    version: "2.2.6"
     data_root: "/var/lib/containerd"
     # K8s 组件镜像仓库（与本地 images/*.tar 内 tag 一致）
     image_repository: "registry.k8s.io"

@@ -1,0 +1,16 @@
+# CentOS Stream 9 - Base Repositories (aliyun mirrors)
+# K8S_MANAGED — deployed by TestOps Platform
+
+[baseos]
+name=CentOS Stream $releasever - BaseOS - mirrors.aliyun.com
+baseurl=https://mirrors.aliyun.com/centos-stream/$stream/BaseOS/$basearch/os/
+gpgcheck=1
+enabled=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+
+[appstream]
+name=CentOS Stream $releasever - AppStream - mirrors.aliyun.com
+baseurl=https://mirrors.aliyun.com/centos-stream/$stream/AppStream/$basearch/os/
+gpgcheck=1
+enabled=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial

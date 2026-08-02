@@ -30,7 +30,8 @@ from src.workflow.workflow_exception import SystemInitError
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+YUM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "yum")
 
 
 def _load_configs():
@@ -50,7 +51,9 @@ def _get_all_nodes(node_list: dict) -> list:
     return nodes
 
 
-def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
+def _init_single_node(node: dict, sys_init: dict, hosts_block: str,
+                      centos_repo_content: str = "",
+                      k8s_repo_content: str = "") -> None:
     """对单个节点执行系统初始化。"""
     hostname = node["hostname"]
     ip = node["ip"]
@@ -94,11 +97,26 @@ def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
         logger.info(f"[{hostname}] 防火墙 ({manager}) 已停止")
 
         # 4. 加载内核模块
-        modules = init_cfg.get("kernel_modules", {}).get("required", [])
-        for mod in pkg_deploy:
-            ssh.exec_command(f"modprobe {mod}", sudo=False)
-            ssh.exec_command(f"echo '{mod}' > /etc/modules-load.d/{mod}.conf", sudo=False)
-        logger.info(f"[{hostname}] 内核模块已加载: {pkg_deploy}")
+        modules = init_cfg.get("kernel_pkg_deploy", {}).get("required", [])
+        loaded_ok = []
+        for mod in modules:
+            exit_code, _, err = ssh.exec_command(f"modprobe {mod} 2>&1", sudo=False)
+            if exit_code != 0:
+                logger.warning(f"[{hostname}] 内核模块 modprobe {mod} 失败: {err[:100]}")
+            else:
+                ssh.exec_command(f"echo '{mod}' > /etc/modules-load.d/{mod}.conf", sudo=False)
+                loaded_ok.append(mod)
+        # 验证模块实际已载入内核（/proc/modules 中模块名用下划线）
+        if loaded_ok:
+            _, proc_modules, _ = ssh.exec_command("cat /proc/modules | awk '{print $1}'")
+            loaded_set = set(proc_modules.strip().split())
+            for mod in loaded_ok:
+                normalized = mod.replace("-", "_")
+                if normalized in loaded_set or mod in loaded_set:
+                    logger.debug(f"[{hostname}] 内核模块已确认: {mod}")
+                else:
+                    logger.warning(f"[{hostname}] modprobe 返回成功但模块未在 /proc/modules 中: {mod}")
+        logger.info(f"[{hostname}] 内核模块已加载: {loaded_ok} (共 {len(loaded_ok)}/{len(modules)})")
 
         # 5. 配置内核参数
         sysctl_params = init_cfg.get("sysctl_params", {})
@@ -151,6 +169,33 @@ def _init_single_node(node: dict, sys_init: dict, hosts_block: str) -> None:
                            f"systemctl restart {ntp_service} 2>/dev/null",
                            sudo=False)
             logger.info(f"[{hostname}] 时间同步 ({ntp_service}) 已配置，服务器: {ntp_servers}")
+
+        # 7.5 配置 YUM 源为阿里云镜像（从本地文件加载）
+        if centos_repo_content:
+            ssh.exec_command(
+                "mv /etc/yum.repos.d/centos.repo "
+                "/etc/yum.repos.d/centos.repo.k8s_bak 2>/dev/null || true",
+                sudo=False
+            )
+            ssh.exec_command(
+                f"cat > /etc/yum.repos.d/centos.repo << 'YUM_EOF'\n"
+                f"{centos_repo_content}\n"
+                f"YUM_EOF",
+                sudo=False, timeout=10
+            )
+            ssh.exec_command("yum clean all 2>/dev/null || true", sudo=False, timeout=30)
+            ssh.exec_command("yum makecache 2>/dev/null || true", sudo=False, timeout=120)
+            logger.info(f"[{hostname}] YUM 源 → aliyun (本地文件)")
+
+        # 7.6 配置 K8s YUM 源为阿里云镜像（从本地文件加载）
+        if k8s_repo_content:
+            ssh.exec_command(
+                f"cat > /etc/yum.repos.d/kubernetes.repo << 'K8S_EOF'\n"
+                f"{k8s_repo_content}\n"
+                f"K8S_EOF",
+                sudo=False, timeout=10
+            )
+            logger.info(f"[{hostname}] K8s YUM 源 → aliyun (本地文件)")
 
         # 8. 配置 /etc/hosts（标记块，防重复）
         if hosts_block:
@@ -207,8 +252,27 @@ def run_sys_init(state: WorkflowStateManager) -> None:
     hosts_lines.append("# END_K8S_HOSTS")
     hosts_block = "\n".join(hosts_lines)
 
+    # 从本地 yum/ 目录加载 centos.repo 和 kubernetes.repo（阿里云镜像源）
+    centos_repo_content = ""
+    centos_repo_path = os.path.join(YUM_DIR, "centos.repo")
+    if os.path.exists(centos_repo_path):
+        with open(centos_repo_path, "r", encoding="utf-8") as f:
+            centos_repo_content = f.read()
+        logger.info(f"已加载 centos.repo (本地): {centos_repo_path}")
+    else:
+        logger.warning(f"centos.repo 本地文件不存在，跳过 YUM 源配置: {centos_repo_path}")
+
+    k8s_repo_content = ""
+    k8s_repo_path = os.path.join(YUM_DIR, "kubernetes.repo")
+    if os.path.exists(k8s_repo_path):
+        with open(k8s_repo_path, "r", encoding="utf-8") as f:
+            k8s_repo_content = f.read()
+        logger.info(f"已加载 kubernetes.repo (本地): {k8s_repo_path}")
+    else:
+        logger.warning(f"kubernetes.repo 本地文件不存在，跳过 K8s YUM 源配置: {k8s_repo_path}")
+
     for node in all_nodes:
-        _init_single_node(node, sys_init, hosts_block)
+        _init_single_node(node, sys_init, hosts_block, centos_repo_content, k8s_repo_content)
 
     logger.info(f"系统初始化完成: {len(all_nodes)} 个节点全部就绪")
     state.set_global("sys_init_completed", True)
@@ -274,8 +338,8 @@ def rollback_sys_init(state: WorkflowStateManager) -> None:
             logger.info(f"[{hostname}] 防火墙 ({manager}) 已恢复")
 
             # 4. 删除内核模块加载配置
-            modules = sys_init.get("system_init", {}).get("kernel_modules", {}).get("required", [])
-            for mod in pkg_deploy:
+            modules = sys_init.get("system_init", {}).get("kernel_pkg_deploy", {}).get("required", [])
+            for mod in modules:
                 ssh.exec_command(f"rm -f /etc/modules-load.d/{mod}.conf", sudo=False)
             logger.info(f"[{hostname}] 内核模块配置已移除")
 
@@ -285,6 +349,14 @@ def rollback_sys_init(state: WorkflowStateManager) -> None:
 
             # 6. 删除 limits 配置
             ssh.exec_command("rm -f /etc/security/limits.d/99-kubernetes.conf", sudo=False)
+
+            # 6.5 恢复 YUM 源
+            ssh.exec_command(
+                "mv /etc/yum.repos.d/centos.repo.k8s_bak "
+                "/etc/yum.repos.d/centos.repo 2>/dev/null || true",
+                sudo=False
+            )
+            logger.info(f"[{hostname}] YUM 源已恢复")
 
             # 7. 清理 /etc/hosts 中的 K8S 标记块
             ssh.exec_command(

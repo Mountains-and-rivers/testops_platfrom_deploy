@@ -26,7 +26,8 @@ from src.workflow.workflow_exception import ContainerdSetupError
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+YUM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "yum")
 GLOBAL_CONFIG_DIR = os.path.join(PROJECT_ROOT, "global_config")
 
 
@@ -52,7 +53,9 @@ def _build_registry_mirror_map(mirror_config: dict) -> dict:
     return dict(mirrors)
 
 
-def _setup_containerd_on_node(node: dict, version: str, mirror_map: dict) -> None:
+def _setup_containerd_on_node(node: dict, version: str, mirror_map: dict,
+                            docker_ce_repo: str = "",
+                            k8s_pause_version: str = "3.10") -> None:
     """在单个节点上安装配置 containerd（兼容 v1.x 和 v2.x）。"""
     hostname = node["hostname"]
     ip = node["ip"]
@@ -70,21 +73,31 @@ def _setup_containerd_on_node(node: dict, version: str, mirror_map: dict) -> Non
         ssh.connect()
         logger.info(f"[{hostname}] 开始安装 containerd v{version}...")
 
-        # 1. 安装 containerd（使用 aliyun Docker-CE 镜像源）
-        logger.info(f"[{hostname}] 添加 aliyun Docker-CE yum 源...")
-        ssh.exec_command_ok("yum install -y yum-utils 2>/dev/null || true",
-                           sudo=False, timeout=60)
-        ssh.exec_command_ok(
-            "yum-config-manager --add-repo "
-            "https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo",
-            sudo=False, timeout=30
-        )
-        # 替换 docker-ce.repo 中官方 URL 为 aliyun（加速）
+        # 0. 清理残留的 kubernetes yum repo（可能来自上次失败的 Stage 3）
         ssh.exec_command(
-            "sed -i 's|https://download.docker.com|https://mirrors.aliyun.com/docker-ce|g' "
-            "/etc/yum.repos.d/docker-ce.repo 2>/dev/null || true",
-            sudo=False
+            "rm -f /etc/yum.repos.d/kubernetes.repo 2>/dev/null; "
+            "yum clean metadata 2>/dev/null || true",
+            sudo=False, timeout=15
         )
+        logger.debug(f"[{hostname}] 已清理可能残留的 kubernetes yum repo")
+
+        # 1. 从本地文件写入 docker-ce.repo（阿里云镜像，无需网络下载）
+        logger.info(f"[{hostname}] 写入 docker-ce yum 源 (本地文件)...")
+        if docker_ce_repo:
+            ssh.exec_command(
+                f"cat > /etc/yum.repos.d/docker-ce.repo << 'DOCKER_CE_EOF'\n"
+                f"{docker_ce_repo}\n"
+                f"DOCKER_CE_EOF",
+                sudo=False, timeout=10
+            )
+        else:
+            ssh.exec_command_ok("yum install -y yum-utils 2>/dev/null || true",
+                               sudo=False, timeout=60)
+            ssh.exec_command_ok(
+                "yum-config-manager --add-repo "
+                "https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo",
+                sudo=False, timeout=30
+            )
         # 安装 containerd，指定版本不可用则装最新
         exit_code, stdout, stderr = ssh.exec_command(
             f"yum install -y containerd.io-{version}",
@@ -112,27 +125,32 @@ def _setup_containerd_on_node(node: dict, version: str, mirror_map: dict) -> Non
         )
         logger.info(f"[{hostname}] containerd 配置已生成")
 
-        # 3. 配置 cgroup 驱动为 systemd
-        ssh.exec_command_ok(
-            "sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' "
-            "/etc/containerd/config.toml",
+        # 3. 配置 cgroup 驱动为 systemd（容忍空白符差异）
+        ssh.exec_command(
+            "sed -i 's/SystemdCgroup\\s*=\\s*false/SystemdCgroup = true/' "
+            "/etc/containerd/config.toml 2>&1",
             sudo=False
         )
+        # 防御性检查：若 sed 未生效（如键名不存在或值已是非 false），回退到任意值替换
+        _, cg_check, _ = ssh.exec_command(
+            "grep -c 'SystemdCgroup = true' /etc/containerd/config.toml 2>/dev/null || echo 0"
+        )
+        if int(cg_check.strip() or 0) == 0:
+            ssh.exec_command(
+                "sed -i 's/SystemdCgroup\\s*=\\s*\\w\\+/SystemdCgroup = true/' "
+                "/etc/containerd/config.toml 2>/dev/null || true",
+                sudo=False
+            )
         logger.info(f"[{hostname}] Cgroup 驱动 → systemd")
 
-        # 3.5 配置 sandbox_image 与 kubeadm 保持一致（避免版本不匹配）
-        _, pause_ver, _ = ssh.exec_command(
-            "kubeadm config images list --kubernetes-version=stable-1 2>/dev/null | "
-            "grep pause | head -1 | awk -F: '{print $NF}' || echo '3.10.2'",
-            sudo=False, timeout=10
-        )
-        sandbox_version = pause_ver.strip() or "3.10.2"
+        # 3.5 配置 sandbox_image 与 kubeadm 版本匹配
+        # 注意：必须使用与 kubeadm init 相同的 pause 版本，否则控制平面无法启动
         ssh.exec_command_ok(
-            f"sed -i 's|sandbox_image = .*|sandbox_image = \"registry.k8s.io/pause:{sandbox_version}\"|' "
+            f"sed -i 's|sandbox_image = .*|sandbox_image = \"registry.k8s.io/pause:{k8s_pause_version}\"|' "
             "/etc/containerd/config.toml",
             sudo=False
         )
-        logger.info(f"[{hostname}] Sandbox 镜像 → pause:{sandbox_version}")
+        logger.info(f"[{hostname}] Sandbox 镜像 → pause:{k8s_pause_version}")
 
         # 4. 配置镜像加速——containerd 2.x 使用 hosts.toml 目录结构
         if mirror_map:
@@ -336,15 +354,46 @@ def run_containerd_setup(state: WorkflowStateManager) -> None:
 
     containerd_version = version_config.get("software_version", {}).get(
         "containerd", {}
-    ).get("default", "1.7.13")
+    ).get("default", "2.2.6")
+
+    # 读取 K8s pause 版本（必须与 kubeadm init 实际写入 containerd 的版本一致）
+    # 注意: pause_map 值为 kubeadm 运行时真正写入 containerd 的 sandbox 版本，
+    # 可能比 kubeadm config images list 列出的版本高一个 patch 号
+    k8s_version = version_config.get("software_version", {}).get(
+        "kubernetes", {}
+    ).get("default", "1.32.8")
+    k8s_minor = ".".join(k8s_version.split(".")[:2])
+    # kubeadm 1.30-1.31 → pause:3.10, kubeadm 1.32+ → pause:3.10.1
+    # （以 kubeadm init 实际写入 containerd config 的值为准）
+    pause_map = {
+        "1.28": "3.9",   "1.29": "3.9",
+        "1.30": "3.10",  "1.31": "3.10",
+        "1.32": "3.10.1", "1.33": "3.10.1",
+        "1.34": "3.10.1", "1.35": "3.10.1", "1.36": "3.10.1",
+    }
+    k8s_pause_version = pause_map.get(k8s_minor)
+    if not k8s_pause_version:
+        logger.warning(f"未找到 K8s {k8s_minor} 的 pause 版本映射，使用默认 3.10")
+        k8s_pause_version = "3.10"
 
     # 预生成镜像仓库映射表
     mirror_map = _build_registry_mirror_map(mirror_config)
 
+    # 从本地 yum/ 目录读取 docker-ce.repo（避免每次从网络下载）
+    docker_ce_repo = ""
+    repo_path = os.path.join(YUM_DIR, "docker-ce.repo")
+    if os.path.exists(repo_path):
+        with open(repo_path, "r", encoding="utf-8") as f:
+            docker_ce_repo = f.read()
+        logger.info(f"已加载 docker-ce.repo (本地): {repo_path}")
+    else:
+        logger.warning(f"docker-ce.repo 本地文件不存在，将回退到网络下载: {repo_path}")
+
     all_nodes = _get_all_nodes(node_list)
 
     for node in all_nodes:
-        _setup_containerd_on_node(node, containerd_version, mirror_map)
+        _setup_containerd_on_node(node, containerd_version, mirror_map,
+                                  docker_ce_repo, k8s_pause_version)
 
     logger.info(f"容器运行时安装完成: {len(all_nodes)} 个节点")
     state.set_global("containerd_setup_completed", True)

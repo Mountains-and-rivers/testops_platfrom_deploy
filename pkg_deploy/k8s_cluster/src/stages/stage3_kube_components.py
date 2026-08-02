@@ -25,15 +25,20 @@ from src.workflow.workflow_exception import KubeComponentInstallError
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+YUM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "yum")
+# RPM 本地缓存与 images/ 放一起（版本配套）
+RPM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "images")
 
-# K8s 官方 RPM 仓库模板
+# K8s RPM 仓库模板（兜底：阿里云镜像加速）
 K8S_REPO_TEMPLATE = (
     "[kubernetes]\n"
     "name=Kubernetes\n"
-    "baseurl=https://pkgs.k8s.io/core:/stable:/v{minor_version}/rpm/\n"
+    "baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-$basearch/\n"
     "enabled=1\n"
     "gpgcheck=0\n"
+    "gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg\n"
+    "       https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg\n"
 )
 
 
@@ -55,8 +60,8 @@ def _get_minor_version(k8s_version: str) -> str:
     return k8s_version
 
 
-def _install_kube_on_node(node: dict, k8s_version: str) -> None:
-    """在单个节点上安装 Kubernetes 组件。"""
+def _install_kube_on_node(node: dict, k8s_minor: str) -> str:
+    """在单个节点上安装 Kubernetes 组件，返回实际安装的版本号。"""
     hostname = node["hostname"]
     ip = node["ip"]
     ssh_cfg = node.get("ssh", {})
@@ -71,35 +76,64 @@ def _install_kube_on_node(node: dict, k8s_version: str) -> None:
 
     try:
         ssh.connect()
-        minor_ver = _get_minor_version(k8s_version)
-        logger.info(f"[{hostname}] 开始安装 K8s 组件 v{k8s_version} (repo: v{minor_ver})...")
-
-        # 1. 添加 K8s YUM 仓库（幂等：每次覆盖写入）
-        repo_content = K8S_REPO_TEMPLATE.format(minor_version=minor_ver)
-        ssh.exec_command(
-            f"cat > /etc/yum.repos.d/kubernetes.repo << 'K8S_EOF'\n{repo_content}\nK8S_EOF",
-            sudo=False
-        )
-        logger.debug(f"[{hostname}] K8s repo 已配置: v{minor_ver}")
-
-        # 2. 安装 kubeadm/kubectl/kubelet（yum install 自带幂等）
-        exit_code, stdout, stderr = ssh.exec_command(
-            f"yum install -y "
-            f"kubeadm-{k8s_version} kubectl-{k8s_version} kubelet-{k8s_version}",
-            sudo=False, timeout=300
-        )
-        if exit_code != 0:
-            raise KubeComponentInstallError(
-                hostname, "kubeadm/kubectl/kubelet",
-                f"安装失败 (exit={exit_code}): {stderr[:300]}"
+        # 0. 检查本地 RPM 缓存（与 images/*.tar 版本配套，优先使用）
+        local_rpms = []
+        if os.path.isdir(RPM_DIR):
+            local_rpms = sorted([f for f in os.listdir(RPM_DIR) if f.endswith('.rpm')])
+        if local_rpms:
+            logger.info(f"[{hostname}] 📦 本地 RPM 安装 ({len(local_rpms)} 个)...")
+            ssh.exec_command("mkdir -p /tmp/k8s_rpms", sudo=False)
+            for rpm_file in local_rpms:
+                ssh.upload_file(os.path.join(RPM_DIR, rpm_file), f"/tmp/k8s_rpms/{rpm_file}")
+            exit_code, stdout, stderr = ssh.exec_command(
+                "rpm -Uvh --replacepkgs /tmp/k8s_rpms/*.rpm 2>&1",
+                sudo=False, timeout=120
             )
+            ssh.exec_command("rm -rf /tmp/k8s_rpms", sudo=False)
+            if exit_code != 0:
+                raise KubeComponentInstallError(
+                    hostname, "kubeadm/kubectl/kubelet",
+                    f"本地 RPM 安装失败 (exit={exit_code}): {stderr[:300]}"
+                )
+        else:
+            # 无本地 RPM，回退在线安装（智能获取仓库最新版本）
+            ssh.exec_command(
+                f"cat > /etc/yum.repos.d/kubernetes.repo << 'EOF'\n"
+                f"[kubernetes]\n"
+                f"name=Kubernetes\n"
+                f"baseurl=https://pkgs.k8s.io/core:/stable:/v{k8s_minor}/rpm/\n"
+                f"enabled=1\n"
+                f"gpgcheck=0\n"
+                f"EOF",
+                sudo=False
+            )
+            _, latest_ver, _ = ssh.exec_command(
+                "yum --disablerepo=* --enablerepo=kubernetes list available kubeadm.x86_64 2>/dev/null | "
+                "grep kubeadm | awk '{print $2}' | sort -V | tail -1 || true",
+                sudo=False, timeout=30
+            )
+            latest_ver = latest_ver.strip()
+            if not latest_ver:
+                raise KubeComponentInstallError(hostname, "kubeadm/kubectl/kubelet",
+                                                 "无法从仓库获取最新 kubeadm 版本，请检查 YUM 源")
+            logger.info(f"[{hostname}] 仓库最新版本: {latest_ver}")
+            exit_code, stdout, stderr = ssh.exec_command(
+                "yum install -y kubeadm kubectl kubelet",
+                sudo=False, timeout=300
+            )
+            if exit_code != 0:
+                raise KubeComponentInstallError(
+                    hostname, "kubeadm/kubectl/kubelet",
+                    f"在线安装失败 (exit={exit_code}): {stderr[:300]}"
+                )
 
         # 获取实际安装的版本
         _, version_out, _ = ssh.exec_command(
             "kubeadm version -o short 2>/dev/null || echo unknown",
             sudo=False
         )
-        logger.info(f"[{hostname}] K8s 组件已安装: {version_out.strip()}")
+        actual_version = version_out.strip()
+        logger.info(f"[{hostname}] K8s 组件已安装: {actual_version}")
 
         # 3. 配置 kubelet（cgroup 驱动 + containerd socket）
         kubelet_config = (
@@ -112,12 +146,28 @@ def _install_kube_on_node(node: dict, k8s_version: str) -> None:
         )
         logger.debug(f"[{hostname}] kubelet 配置已写入")
 
-        # 4. 启用 kubelet（不启动，等待 kubeadm init 接管）
+        # 4. 配置 crictl（kubeadm/kubelet 通过 crictl 与容器运行时通信）
+        #    无此文件时部分 kubeadm 版本无法定位 CRI socket
+        crictl_config = (
+            "runtime-endpoint: unix:///var/run/containerd/containerd.sock\n"
+            "image-endpoint: unix:///var/run/containerd/containerd.sock\n"
+            "timeout: 10\n"
+            "debug: false\n"
+        )
+        ssh.exec_command(
+            f"cat > /etc/crictl.yaml << 'CRICTL_EOF'\n{crictl_config}\nCRICTL_EOF",
+            sudo=False
+        )
+        logger.debug(f"[{hostname}] crictl.yaml 已配置")
+
+        # 5. 启用 kubelet（不启动，等待 kubeadm init 接管）
         ssh.exec_command_ok("systemctl enable kubelet 2>/dev/null || true", sudo=False)
 
-        # 5. 安装后扫描验证
-        _verify_kube(ssh, hostname, k8s_version)
+        # 6. 安装后扫描验证
+        _verify_kube(ssh, hostname, actual_version)
         logger.info(f"[{hostname}] K8s 组件安装完成 ✓")
+
+        return actual_version
 
     except KubeComponentInstallError:
         raise
@@ -247,18 +297,20 @@ def run_kube_components(state: WorkflowStateManager) -> None:
 
     node_list = YAMLHelper.load(os.path.join(CONFIG_DIR, "node_list.yaml"))
     version_config = YAMLHelper.load(os.path.join(CONFIG_DIR, "software_version.yaml"))
-    k8s_version = version_config.get("software_version", {}).get(
+    k8s_full = version_config.get("software_version", {}).get(
         "kubernetes", {}
-    ).get("default", "1.36.3")
+    ).get("default", "1.32")
+    k8s_minor = _get_minor_version(k8s_full)
 
     all_nodes = _get_all_nodes(node_list)
 
+    actual_version = k8s_full
     for node in all_nodes:
-        _install_kube_on_node(node, k8s_version)
+        actual_version = _install_kube_on_node(node, k8s_minor)
 
-    logger.info(f"K8s 组件安装完成: {len(all_nodes)} 个节点")
+    logger.info(f"K8s 组件安装完成: {len(all_nodes)} 个节点, 版本 {actual_version}")
     state.set_global("kube_components_installed", True)
-    state.set_global("k8s_version", k8s_version)
+    state.set_global("k8s_version", actual_version.lstrip("v"))
 
 
 def rollback_kube_components(state: WorkflowStateManager) -> None:

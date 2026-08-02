@@ -25,7 +25,7 @@ from src.workflow.workflow_exception import NodeJoinError, TokenExpiredError
 
 logger = get_logger(__name__)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
 
 
 def _join_single_worker(worker: dict, state: WorkflowStateManager) -> None:
@@ -144,6 +144,8 @@ def run_node_join(state: WorkflowStateManager) -> None:
     Args:
         state: 工作流状态管理器实例
     """
+    state.require_stage_success("stage4_master_init")
+
     logger.info("=" * 50)
     logger.info("Stage 5: 开始 Node 节点加入集群")
     logger.info("=" * 50)
