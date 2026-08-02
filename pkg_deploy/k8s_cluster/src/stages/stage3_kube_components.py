@@ -245,19 +245,18 @@ def _verify_kube(ssh: SSHClient, hostname: str, expected_version: str) -> None:
     else:
         checks.append(("kubelet配置", "FAIL", "配置缺失或错误"))
 
-    # 7. K8s YUM repo 存在且 URL 正确
+    # 7. K8s YUM repo 存在且 URL 正确（本地 RPM 安装时无此文件也正常）
     _, repo_url, _ = ssh.exec_command(
         "grep '^baseurl=' /etc/yum.repos.d/kubernetes.repo 2>/dev/null || echo MISSING"
     )
     if "MISSING" not in repo_url:
-        # 检查 URL 是否包含正确的 minor 版本
         minor = ".".join(expected_ver.split(".")[:2])
         if minor in repo_url:
             checks.append(("YUM仓库", "PASS", repo_url.strip()[:70]))
         else:
             checks.append(("YUM仓库", "WARN", f"版本不匹配: {repo_url.strip()[:60]}"))
     else:
-        checks.append(("YUM仓库", "FAIL", "缺失"))
+        checks.append(("YUM仓库", "WARN", "缺失（本地 RPM 安装无需仓库）"))
 
     # 8. kubelet 服务状态（应 inactive，等待 kubeadm init）
     _, kls, _ = ssh.exec_command("systemctl is-active kubelet 2>/dev/null || echo inactive")
