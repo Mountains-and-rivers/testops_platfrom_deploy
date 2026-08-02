@@ -65,23 +65,36 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
             f"https://raw.githubusercontent.com/projectcalico/calico/{calico_ver}/manifests/calico.yaml",
         ]
 
-        # 1. 下载 manifest
-        logger.info("下载 Calico manifest...")
+        # 1. 获取 manifest（优先本地文件 → GitHub 下载）
+        MODULE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        IMAGES_DIR = os.path.join(MODULE_DIR, "images")
+        local_manifest = os.path.join(IMAGES_DIR, f"calico_{calico_ver}.yaml")
         downloaded = False
-        for idx, url in enumerate(CALICO_URLS):
-            logger.info(f"  尝试 [{idx+1}/{len(CALICO_URLS)}]: {url.split('/')[2]}")
-            exit_code, _, _ = ssh.exec_command(
-                f"curl -sL --connect-timeout 10 -o /tmp/calico.yaml '{url}' 2>&1 || echo FAILED",
-                timeout=30
-            )
-            if exit_code == 0 and "FAILED" not in _:
-                _, size, _ = ssh.exec_command("wc -c < /tmp/calico.yaml", timeout=5)
-                if size.strip().isdigit() and int(size.strip()) > 1000:
-                    downloaded = True
-                    logger.info(f"  OK ({size.strip()} bytes)")
-                    break
+
+        if os.path.exists(local_manifest) and os.path.getsize(local_manifest) > 1000:
+            logger.info(f"使用本地 manifest: calico_{calico_ver}.yaml")
+            ssh.upload_file(local_manifest, "/tmp/calico.yaml")
+            _, size, _ = ssh.exec_command("wc -c < /tmp/calico.yaml", timeout=5)
+            if size.strip().isdigit() and int(size.strip()) > 1000:
+                downloaded = True
+                logger.info(f"  OK ({size.strip()} bytes)")
+
         if not downloaded:
-            raise CNIDeployError("calico", "manifest 下载失败")
+            logger.info("下载 Calico manifest...")
+            for idx, url in enumerate(CALICO_URLS):
+                logger.info(f"  尝试 [{idx+1}/{len(CALICO_URLS)}]: {url.split('/')[2]}")
+                exit_code, _, _ = ssh.exec_command(
+                    f"curl -sL --connect-timeout 10 -o /tmp/calico.yaml '{url}' 2>&1 || echo FAILED",
+                    timeout=30
+                )
+                if exit_code == 0 and "FAILED" not in _:
+                    _, size, _ = ssh.exec_command("wc -c < /tmp/calico.yaml", timeout=5)
+                    if size.strip().isdigit() and int(size.strip()) > 1000:
+                        downloaded = True
+                        logger.info(f"  OK ({size.strip()} bytes)")
+                        break
+            if not downloaded:
+                raise CNIDeployError("calico", "manifest 下载失败")
 
         # 2. 修改 Pod 网段
         net = cluster_info.get("cluster_info", {}).get("networking", {})
