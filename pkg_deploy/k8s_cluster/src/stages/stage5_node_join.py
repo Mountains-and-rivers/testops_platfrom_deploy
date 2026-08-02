@@ -63,8 +63,10 @@ def _join_single_worker(worker: dict, state: WorkflowStateManager) -> None:
             _ver_cfg = YAMLHelper.load(os.path.join(CONFIG_DIR, "software_version.yaml"))
             kv = _ver_cfg.get("software_version", {}).get("kubernetes", {}).get("default", "1.32.13")
         # Worker 需要的所有 kube-system 镜像（coredns 版本与 kubeadm 1.32 内置一致）
+        # pause: 同时包含 sandbox 版本 + kubeadm image list 版本
         pre_pull_images = [
-            f"registry.k8s.io/pause:{pv}",              # sandbox
+            f"registry.k8s.io/pause:{pv}",              # sandbox（如 3.10.1）
+            f"registry.k8s.io/pause:3.10",              # kubeadm image list 版本
             f"registry.k8s.io/kube-proxy:v{kv}",        # kube-proxy daemonset
             f"registry.k8s.io/coredns/coredns:v1.11.3",  # coredns deployment
         ]
