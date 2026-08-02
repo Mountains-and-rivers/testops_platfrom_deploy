@@ -83,18 +83,21 @@ def run_cni_deploy(state: WorkflowStateManager) -> None:
             logger.info("下载 Calico manifest...")
             for idx, url in enumerate(CALICO_URLS):
                 logger.info(f"  尝试 [{idx+1}/{len(CALICO_URLS)}]: {url.split('/')[2]}")
-                exit_code, _, _ = ssh.exec_command(
+                exit_code, curl_out, _ = ssh.exec_command(
                     f"curl -sL --connect-timeout 10 -o /tmp/calico.yaml '{url}' 2>&1 || echo FAILED",
-                    timeout=30
+                    timeout=15
                 )
-                if exit_code == 0 and "FAILED" not in _:
+                if exit_code == 0 and "FAILED" not in curl_out:
                     _, size, _ = ssh.exec_command("wc -c < /tmp/calico.yaml", timeout=5)
                     if size.strip().isdigit() and int(size.strip()) > 1000:
                         downloaded = True
                         logger.info(f"  OK ({size.strip()} bytes)")
                         break
+                else:
+                    logger.warning(f"  失败: {curl_out.strip()[-120:]}")
             if not downloaded:
-                raise CNIDeployError("calico", "manifest 下载失败")
+                raise CNIDeployError("calico",
+                    f"manifest 下载失败（已尝试 {len(CALICO_URLS)} 个源），请检查网络或手动放入 images/calico_{calico_ver}.yaml")
 
         # 2. 修改 Pod 网段
         net = cluster_info.get("cluster_info", {}).get("networking", {})
