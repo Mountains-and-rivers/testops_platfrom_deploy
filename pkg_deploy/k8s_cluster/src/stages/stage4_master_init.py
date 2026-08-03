@@ -418,7 +418,15 @@ def run_master_init(state: WorkflowStateManager) -> None:
                         sudo=False, timeout=30
                     )
                     try:
-                        ssh.download_file(f"/tmp/k8s-images/{img_name}.tar", local_tar)
+                        # 导出前验证远程文件非空
+                        _, sz, _ = ssh.exec_command(
+                            f"stat -c%s /tmp/k8s-images/{img_name}.tar 2>/dev/null || echo 0",
+                            timeout=5
+                        )
+                        if sz.strip().isdigit() and int(sz.strip()) > 0:
+                            ssh.download_file(f"/tmp/k8s-images/{img_name}.tar", local_tar)
+                        else:
+                            logger.debug(f"[{hostname}]   丢弃空缓存 {img_name}.tar")
                     except Exception:
                         pass
                 continue
@@ -481,7 +489,14 @@ def run_master_init(state: WorkflowStateManager) -> None:
                     sudo=False, timeout=30
                 )
                 try:
-                    ssh.download_file(f"/tmp/k8s-images/{img_name}.tar", local_tar)
+                    _, sz, _ = ssh.exec_command(
+                        f"stat -c%s /tmp/k8s-images/{img_name}.tar 2>/dev/null || echo 0",
+                        timeout=5
+                    )
+                    if sz.strip().isdigit() and int(sz.strip()) > 0:
+                        ssh.download_file(f"/tmp/k8s-images/{img_name}.tar", local_tar)
+                    else:
+                        logger.debug(f"[{hostname}]   丢弃空缓存 {img_name}.tar")
                 except Exception:
                     pass
 

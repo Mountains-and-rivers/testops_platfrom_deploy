@@ -2,7 +2,6 @@ calico_v3.29.1.yaml
 cni_v3.29.1.tar
 coredns_v1.11.3.tar
 cri-tools-1.32.0-150500.1.1.x86_64.rpm
-etcd_3.5.16-0.tar
 kube-apiserver_v1.32.13.tar
 kube-controller-manager_v1.32.13.tar
 kube-controllers_v3.29.1.tar

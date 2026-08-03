@@ -84,14 +84,29 @@ def run_cluster_verify(state: WorkflowStateManager) -> None:
 
         # ---- 2. 核心组件 Pod ----
         logger.info("[2/7] 核心组件 Pod...")
-        _, out, _ = ssh.exec_command("kubectl get pods -n kube-system --no-headers", timeout=15)
+        import time as _time
         not_running = []
-        for line in out.strip().split("\n"):
-            if not line: continue
-            parts = line.split()
-            name, ready, status = parts[0], parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""
-            if status not in ("Running", "Completed"):
-                not_running.append(f"{name}={status}")
+        for attempt in range(12):  # 最多等 60s
+            _, out, _ = ssh.exec_command("kubectl get pods -n kube-system --no-headers", timeout=15)
+            not_running = []
+            for line in out.strip().split("\n"):
+                if not line: continue
+                parts = line.split()
+                name, ready, status = parts[0], parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""
+                # ContainerCreating 是暂态，等待即可
+                if status not in ("Running", "Completed") and status != "ContainerCreating":
+                    not_running.append(f"{name}={status}")
+            if not_running:
+                break  # 有实质性错误，立即报
+            # 检查是否还有 ContainerCreating
+            has_creating = any(
+                line.split()[2] == "ContainerCreating"
+                for line in out.strip().split("\n") if line and len(line.split()) > 2
+            )
+            if not has_creating:
+                break
+            logger.info(f"  等待 Pod 就绪... ({(attempt+1)*5}s)")
+            _time.sleep(5)
         results["pods"] = len(not_running) == 0
         if not_running:
             all_passed = False
