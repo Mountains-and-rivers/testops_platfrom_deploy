@@ -418,15 +418,15 @@ def run_master_init(state: WorkflowStateManager) -> None:
                         sudo=False, timeout=30
                     )
                     try:
-                        # 导出前验证远程文件非空
-                        _, sz, _ = ssh.exec_command(
-                            f"stat -c%s /tmp/k8s-images/{img_name}.tar 2>/dev/null || echo 0",
-                            timeout=5
+                        # 校验 tar 完整性：tar tf 成功才算有效
+                        _, valid, _ = ssh.exec_command(
+                            f"tar tf /tmp/k8s-images/{img_name}.tar >/dev/null 2>&1 && echo VALID || echo BROKEN",
+                            timeout=10
                         )
-                        if sz.strip().isdigit() and int(sz.strip()) > 0:
+                        if valid.strip() == "VALID":
                             ssh.download_file(f"/tmp/k8s-images/{img_name}.tar", local_tar)
                         else:
-                            logger.debug(f"[{hostname}]   丢弃空缓存 {img_name}.tar")
+                            logger.debug(f"[{hostname}]   丢弃损坏缓存 {img_name}.tar")
                     except Exception:
                         pass
                 continue
@@ -489,14 +489,14 @@ def run_master_init(state: WorkflowStateManager) -> None:
                     sudo=False, timeout=30
                 )
                 try:
-                    _, sz, _ = ssh.exec_command(
-                        f"stat -c%s /tmp/k8s-images/{img_name}.tar 2>/dev/null || echo 0",
-                        timeout=5
+                    _, valid, _ = ssh.exec_command(
+                        f"tar tf /tmp/k8s-images/{img_name}.tar >/dev/null 2>&1 && echo VALID || echo BROKEN",
+                        timeout=10
                     )
-                    if sz.strip().isdigit() and int(sz.strip()) > 0:
+                    if valid.strip() == "VALID":
                         ssh.download_file(f"/tmp/k8s-images/{img_name}.tar", local_tar)
                     else:
-                        logger.debug(f"[{hostname}]   丢弃空缓存 {img_name}.tar")
+                        logger.debug(f"[{hostname}]   丢弃损坏缓存 {img_name}.tar")
                 except Exception:
                     pass
 
